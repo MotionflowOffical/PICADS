@@ -1,0 +1,2 @@
+top: compute
+description: Inferred spatial pipeline with clocked registers and valid handshake.

@@ -1,0 +1,6 @@
+name: ExplicitNetwork
+source: circuit.py
+mcd: design.mcd
+co: architecture.co
+physical:
+  enabled: false

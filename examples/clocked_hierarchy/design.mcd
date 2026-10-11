@@ -1,0 +1,9 @@
+top: accumulate_view
+description: Two independent sequential child instances with one shared clock.
+modules:
+  - name: DelayUnit
+    function: one_cycle_delay
+    inputs: {value: 4}
+    outputs: {result: 4}
+requires:
+  - {module: DelayUnit, min_instances: 2}

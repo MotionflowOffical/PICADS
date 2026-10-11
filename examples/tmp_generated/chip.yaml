@@ -1,0 +1,6 @@
+name: ArithmeticExample
+mcd: design.mcd
+source: circuit.py
+co: architecture.co
+physical:
+  enabled: false

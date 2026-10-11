@@ -1,0 +1,4 @@
+modules:
+  hierarchy: preserve
+architecture:
+  adder: auto

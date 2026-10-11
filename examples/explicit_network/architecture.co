@@ -1,0 +1,3 @@
+modules:
+  naming: mcd
+  hierarchy: preserve

@@ -1,0 +1,3 @@
+top: calculate
+description: Conditional pure operations scheduled with captured input predicate.
+requires: []

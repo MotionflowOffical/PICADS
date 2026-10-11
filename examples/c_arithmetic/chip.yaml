@@ -1,0 +1,8 @@
+name: CArithmetic
+mcd: design.mcd
+co: architecture.co
+source: circuit.c
+verification:
+  native_c: false   # set true explicitly when you have GCC and trust the input source
+physical:
+  enabled: false

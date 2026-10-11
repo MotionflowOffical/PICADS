@@ -1,0 +1,5 @@
+top: calculate
+modules:
+  - name: calculate
+    function: calculate
+    purpose: Automatic arithmetic logic from fixed-width C syntax

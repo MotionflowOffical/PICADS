@@ -1,0 +1,2 @@
+top: compute
+description: Same physical adder reused over two execution cycles under a generated controller.

@@ -1,0 +1,5 @@
+top: sample
+description: Simple clocked register demonstration
+modules:
+  - name: input_register
+    purpose: Return previous cycle's value of input a

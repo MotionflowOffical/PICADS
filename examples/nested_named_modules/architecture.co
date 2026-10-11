@@ -1,0 +1,6 @@
+modules:
+  hierarchy: preserve
+  naming: mcd
+allocation:
+  max_instances:
+    ADD: 5

@@ -1,0 +1,5 @@
+top: calculate
+modules:
+  - name: BranchingArithmetic
+    function: calculate
+    purpose: Sequentially execute only the selected arithmetic branch.

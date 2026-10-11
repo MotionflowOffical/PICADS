@@ -1,0 +1,14 @@
+top: top
+description: Nested pure hierarchy bound to actual MCD module names.
+modules:
+  - name: ArithmeticLeaf
+    function: leaf
+    inputs: {a: 4, b: 4}
+    outputs: {result: 5}
+  - name: ArithmeticMid
+    function: middle
+    inputs: {a: 4, b: 4}
+    outputs: {result: 6}
+requires:
+  - {module: ArithmeticLeaf, min_instances: 2}
+  - {function: middle, min_instances: 2}

@@ -1,0 +1,6 @@
+name: PipelinedArithmetic
+mcd: design.mcd
+co: architecture.co
+source: circuit.py
+physical:
+  enabled: false

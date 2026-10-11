@@ -1,0 +1,4 @@
+schedule:
+  pipeline_stages: 3
+architecture:
+  adder: auto

@@ -1,0 +1,5 @@
+top: calculate
+modules:
+  - name: ScratchpadEngine
+    function: calculate
+    purpose: A four-entry register-bank scratchpad, with address fault reporting.

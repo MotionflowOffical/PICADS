@@ -1,0 +1,21 @@
+top: calculate
+description: Explicit module network implementing a conditional arithmetic behavior.
+modules:
+  - {name: Adder, function: add}
+  - {name: Multiplier, function: mul}
+  - {name: ResultSelector, function: choose_result}
+requires:
+  - {module: Adder, min_instances: 1}
+  - {module: Multiplier, min_instances: 1}
+network:
+  instances:
+    - {name: sum, function: add}       # a, b auto-connect to top inputs
+    - {name: product, function: mul}   # a, b auto-connect to top inputs
+    - name: selector
+      function: choose_result
+      inputs:
+        sum_value: sum.result
+        product: product.result
+        # choose auto-connects to top input
+  outputs:
+    result: selector.result

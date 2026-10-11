@@ -1,0 +1,5 @@
+top: calculate
+description: Procedurally created arithmetic, auto-resolves addition or multiplication
+modules:
+  - name: arithmetic
+    purpose: Add two unsigned 4-bit integers or multiply them as selected by d

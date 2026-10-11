@@ -1,0 +1,11 @@
+schedule:
+  mode: transactional
+  latencies:
+    MUL: 3
+    ADD: 2
+  ready_types:
+    - MUL
+allocation:
+  max_instances:
+    ADD: 1
+    MUL: 1

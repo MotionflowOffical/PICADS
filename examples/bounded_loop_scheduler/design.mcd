@@ -1,0 +1,2 @@
+top: accumulate
+description: Three statically unrolled additions using one sequentially reused adder.

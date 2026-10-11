@@ -1,0 +1,8 @@
+top: compute
+description: Independently generated arithmetic module with two physical instances.
+modules:
+  - name: adder_unit
+    function: adder
+    purpose: Procedurally constructed 4-bit addition
+    inputs: {x: 4, y: 4}
+    outputs: {result: 5}

@@ -1,0 +1,5 @@
+schedule:
+  mode: time_share
+allocation:
+  max_instances:
+    ADD: 1

@@ -1,0 +1,7 @@
+# Chip Compiler v0.7.0 — Release notes
+
+Cumulative update to v0.6.0. New `schedule.mode: transactional` compiles a typed subset of conditional and sequential behavior to real DLS gates and an explicit FSM. Includes guarded branches (not speculative), configurable operator reservation cycles and ready backpressure, per-cycle stalls, synchronous reset, bounded register-bank memory with address faults, and direct structural Verilog export. One primitive shared arithmetic unit is emitted per operation kind. Generates `co_schedule.json` for inspection. Allows pure ternary and Boolean expressions in the supported subset. A separate round-robin DLS arbiter supports 2..8 clients and explicit MCD network insertion.
+
+New independent source-to-DLS transaction verification tests handshake, changed live inputs, stalls/ready controls and memory persistence. Failure evidence contains a counterexample and recent CFG execution trace. Optional Icarus RTL checking now has a scheduled testbench generator; its actual execution requires tools unavailable in the release environment.
+
+**Compatibility:** Existing `spatial` and `time_share` modes are unchanged. The new mode is opt-in. It rejects unsupported config and scheduling behavior rather than silently approximating it. Physical timing, concurrent multi-request scheduling, full C/C++, GUI runtime and manufacturing signoff are not yet verified/completed.

@@ -1,0 +1,6 @@
+architecture:
+  adder: prefix
+allocation:
+  sharing: force
+  max_instances:
+    ADD: 1

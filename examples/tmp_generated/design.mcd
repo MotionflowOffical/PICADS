@@ -1,0 +1,5 @@
+top: calculate
+description: Automatically synthesized 4-bit arithmetic circuit
+modules:
+  - name: Arithmetic
+    purpose: Select addition or multiplication based on d

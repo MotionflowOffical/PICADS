@@ -1,0 +1,9 @@
+schedule:
+  mode: transactional
+  latencies:
+    READ: 2
+    WRITE: 2
+  ready_types: [READ, WRITE]
+memory:
+  depth: 4
+  data_width: 5
