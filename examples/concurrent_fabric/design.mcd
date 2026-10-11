@@ -1,0 +1,3 @@
+top: SharedFabric
+description: Gate-level concurrent resource fabric with buffered clients, ALU and memory domains
+modules: []

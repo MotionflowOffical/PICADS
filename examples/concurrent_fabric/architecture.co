@@ -1,0 +1,7 @@
+schedule:
+  mode: concurrent_fabric
+fabric:
+  clients: 3
+  width: 4
+  depth: 4
+  operator: builtin

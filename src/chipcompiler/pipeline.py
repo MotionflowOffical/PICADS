@@ -108,6 +108,8 @@ class BuildSession:
         if self.issues.errors:
             for stage in ('generate','equivalence','export'):self._block(stage)
             return
+        if (self.project.co.get('schedule') or {}).get('mode')=='concurrent_fabric':
+            return self._run_fabric()
         self.events.emit('generate','start',source=str(self.project.source_file))
         try:
             schedule_mode=(self.project.co.get('schedule') or {}).get('mode','spatial')
@@ -372,6 +374,9 @@ class BuildSession:
                 return
             self.result.files['rtl_verification']=str(self.out/'rtl_verification.json')
         if self.mode not in ('build','physical'):return
+        return self._run_native_flow(rtl)
+
+    def _run_native_flow(self,rtl):
         # Optional external dependencies are actual required steps in build mode, not silent fallbacks.
         backend=(self.project.config.get('tools') or {}).get('execution','native')
         wsl_dist=(self.project.config.get('tools') or {}).get('wsl_distribution')
@@ -464,3 +469,73 @@ class BuildSession:
             cause='PDK/foundry mask data and exhaustive signoff evidence are not certified by Chip Compiler.',
             remedy='Qualify every required DRC/LVS/timing/corner/antenna/power check and mask preparation with your PDK.')
         self._done('signoff','UNAVAILABLE',reason='Foundry-qualified independent signoff not established')
+
+    def _run_fabric(self):
+        """Compile a reusable multi-client controller, not a behavioral source function.
+
+        Source equivalence is explicitly NOT_APPLICABLE. An independent protocol
+        regression provides the actual verification evidence instead.
+        """
+        from .concurrent import concurrent_fabric,FabricConfig
+        from .fabric_verify import check_fabric_protocol,randomized_fabric_check
+        try:
+            spec=FabricConfig(**(self.project.co.get('fabric') or {}))
+            self.dls=concurrent_fabric(spec,self.project.top)
+            dls_path=self.out/(self.dls.name+'.dls')
+            self.dls.save(dls_path)
+            self.result.files['dls']=str(dls_path)
+            self._done('generate','PASS',stats=self.dls.stats(),spec=spec.__dict__)
+        except (ValueError,TypeError) as exc:
+            issue=self.issues.add('CO.FABRIC_GENERATION','ERROR','CO','generate',str(exc),
+                cause='Invalid concurrent resource fabric configuration.',
+                remedy='Correct CO.fabric and rerun the design.')
+            self._done('generate','FAIL',issue_id=issue.issue_id)
+            self._block('protocol_check',issue);self._block('export',issue)
+            return
+        self._done('equivalence','NOT_APPLICABLE',
+                   reason='This design is an MCD/CO hardware service primitive, not a compiled source function.')
+        self.issues.add('VERIFY.FABRIC_NO_SOURCE_EQUIVALENCE','WARNING','VERIFIER','equivalence',
+                        'Concurrent fabric has a fixed interface and no source function reference to prove equivalence against.',
+                        remedy='Use protocol test evidence, an independent RTL simulator and formal properties before fabrication.')
+        evidence=check_fabric_protocol(self.dls,spec)
+        scoreboards=[]
+        if evidence['status']=='PASS':
+            for seed in (8291,29471,19013):
+                row=randomized_fabric_check(self.dls,spec,cycles=160,seed=seed)
+                scoreboards.append(row)
+                if row['status']!='PASS':
+                    evidence={'status':'FAIL','scenario':'randomized independent scoreboard',
+                              'counterexample':row,'deterministic':evidence}
+                    break
+        if evidence['status']=='PASS':evidence['randomized_scoreboards']=scoreboards
+        atomic_write(self.out/'fabric_protocol.json',json.dumps(evidence,indent=2,sort_keys=True))
+        self.result.files['fabric_protocol']=str(self.out/'fabric_protocol.json')
+        if evidence['status']!='PASS':
+            issue=self.issues.add('VERIFY.FABRIC_PROTOCOL','ERROR','VERIFIER','protocol_check',
+                       'Concurrent fabric did not satisfy the protocol reference tests.',
+                       evidence=evidence,remedy='Inspect fabric_protocol.json and replay the failing vector.')
+            self._done('protocol_check','FAIL',issue_id=issue.issue_id)
+            self._block('export',issue);return
+        self._done('protocol_check','PASS',scenarios=evidence['scenarios'],checks=evidence['checks'],random_seeds=[x['seed'] for x in scoreboards])
+        try:
+            rtl=self.out/(self.dls.name+'.v')
+            export_verilog(self.dls,rtl)
+            self.result.files['verilog']=str(rtl)
+            self._done('export','PASS',path=str(rtl))
+        except Exception as exc:
+            issue=self.issues.add('EXPORT.VERILOG','ERROR','DLS','export',str(exc))
+            self._done('export','FAIL',issue_id=issue.issue_id);return
+        if (self.project.config.get('verification') or {}).get('external_rtl',False):
+            from .rtl_check import check_rtl
+            cfg=self.project.config.get('tools') or {}
+            opts={'runner':cfg.get('execution','native'), 'wsl_distribution':cfg.get('wsl_distribution')}
+            result=check_rtl(self.dls,rtl,self.out,self.issues,self.events,run_options=opts,
+                      vector_count=(self.project.config.get('verification') or {}).get('rtl_vectors',128))
+            self._done('rtl_check',result['status'],**{k:v for k,v in result.items() if k!='status'})
+            if result['status']!='PASS':
+                if self.mode in ('build','physical'):
+                    self._block('yosys',result.get('issue_id'))
+                    self._block('physical',result.get('issue_id'))
+                return
+        if self.mode=='compile':return
+        return self._run_native_flow(rtl)

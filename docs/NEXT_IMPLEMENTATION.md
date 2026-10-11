@@ -1,19 +1,21 @@
-# Remaining engineering after v0.7.0
+# Remaining engineering after v0.8.0
 
-## Priority 1 — General concurrent HLS scheduling (NOT COMPLETE)
-The new transactional CFG scheduler supports guarded branches, register-bank memory, bounded loops, stalls, explicit ready signals and per-operation reservation latencies, but allows **one in-flight transaction** and a single unit per used operation kind. Implement a scheduler with multiple in-flight tasks, resource request queues, real initiation intervals, fair arbitration of independently clocked modules, ready/valid backpressure, registered feedback, explicit memory dependencies and controller composition. Tie variable operation latency to actual supported resource interfaces and verified timing, not an artificial wait around combinational gates. Prove cycle-level protocols for all new modes. Support safe width/type flow merging across branches and general static single assignment with source map.
+## 1. Full concurrent high-level synthesis and MCD integration
 
-## Priority 2 — Full MCD graph orchestration (NOT COMPLETE)
-Currently explicit typed networks are supported; arbitration primitive can be inserted manually. Build automatic allocation and routing of shared units across module boundaries, memory ports, interfaces, independent resets/clocks, buffering, fanout and deadlock detection. MCD.network must remain semantically equivalent to the source reference or report the mismatch.
+The v0.8 fabric is a **real but bounded synchronous hardware resource service**. It is not a general compiler translating independent arbitrary Python/C++ programs into concurrently executing architectures. Still required: discovering resource requests in MCD modules, automatic cross-module routing/binding, per-module scheduling state machines, real context/transaction IDs, multiple tasks in flight per client, SSA/value lifetime analysis, data hazards, burst interfaces and deadlock checking across arbitrary feedback networks.
 
-## Priority 3 — Real native tool runs (NOT VERIFIED HERE)
-Install and pin Icarus/Verilator, Yosys, LibreLane/OpenROAD, KLayout, and a known-good standard CMOS PDK on Windows/WSL2. Run the *real* scheduled RTL checks, actual technology mapping, physical placement/route, parasitic extraction, DRC/LVS and postroute timing. Preserve complete native logs and stage causality. UI requires real PySide6 runtime smoke testing on Windows.
+## 2. External operator and memory protocols
 
-## Priority 4 — Frontends and verification (PARTIAL)
-Python and C/C++ are restricted statically analyzed subsets, not unrestricted language compilation. Use real Bambu/CIRCT integrations for wider synthesizable C/C++ support; consider external memory protocols and operand casts. Expand sequential formal equivalence beyond deterministic sampled checks, including reset/clock semantics, assertions on ready/done/fault and gate-level functional equivalence.
+Expand from one external single-owner untagged ALU to multiple characterized pipelined operator instances, ready/valid across stalls without a shared global stall assumption, explicit flush semantics, transaction-tag matching and cancellation. Expand one register-bank memory port to SRAM macros/AXI-like protocols with variable access latency, bandwidth/resource limits, coherence when required and independently verified memory ordering.
 
-## Priority 5 — Custom technology and manufacturing (NOT IMPLEMENTED)
-Develop a characterized TFT cell library and technology PDK (Liberty/LEF/GDS, RC, DRC/LVS extraction decks, power integrity, masks/polarity). The current GDS preview and artifact checks are not foundry signoff. Enforce explicit reset or proven memory/FF startup behavior for fabrication: Verilog register initializers alone do not establish an ASIC power-on state.
+## 3. Independent executable tests on target platform
 
-## Priority 6 — IDE runtime and QA (SOURCE EXISTS, UNVERIFIED HERE)
-Run PySide6 on target system; verify all workspaces, autosave/restore, graphs, cancellation and responsive background builds. Add one-hot CFG step traces, arbitration signal inspectors and native tool availability diagnostics to the GUI. Avoid pretending a generated waveform or GDS screenshot proves successful fabrication.
+Run `RUN_FULL_VALIDATION.bat` and inspect the returned ZIP. Fix real GUI exceptions and independent RTL-vs-DLS mismatches if they appear. Ensure actual RTL simulation and Yosys pass on a fully installed Windows/WSL2 setup; investigate clock/reset timing and synthesizability of the generated sequential logic. Expand formal properties beyond deterministic sampled protocol checks.
+
+## 4. Physical design and custom fabrication
+
+Use a known-good open process before a custom thin-film transistor library. Characterize transistor and wire behavior, standard-cell timing/area/leakage, RC extraction, LEF/GDS, DRC/LVS decks, clocking/power and all relevant corners. Run actual Yosys/LibreLane/OpenROAD, verify extracted connectivity and physical checks. A GDS exists is NOT manufacturing signoff or mask preparation.
+
+## 5. GUI and diagnostic improvements
+
+End-to-end native PySide6 interaction tests and project recovery tests on actual Windows. Add interactive multi-client timeline and resource contention heatmaps, real native error links to source/CO and actionable remediation. Preserve the existing causal error-chain and no-silent-fallback policy.

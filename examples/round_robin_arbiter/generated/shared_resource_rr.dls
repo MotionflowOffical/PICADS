@@ -1,0 +1,803 @@
+{
+  "format": "ChipCompiler-DLS",
+  "inputs": {
+    "payload_0": 8,
+    "payload_1": 8,
+    "payload_2": 8,
+    "request_0": 1,
+    "request_1": 1,
+    "request_2": 1,
+    "reset": 1,
+    "resource_ready": 1,
+    "stall": 1
+  },
+  "instances": [],
+  "metadata": {
+    "auto_network_insertion": false,
+    "clients": 3,
+    "kind": "round_robin_arbiter",
+    "payload_width": 8,
+    "protocol": "Synchronous active-high RESET; clients hold request and payload while resource_ready=0; grants fire on ready & !stall & !reset; pointer advances after grant; no queue or transfer buffering.",
+    "strategies": {}
+  },
+  "name": "shared_resource_rr",
+  "nodes": [
+    {
+      "inputs": [
+        "$turn_0[0]",
+        "request_0[0]"
+      ],
+      "name": "g000001",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_0[0]"
+      ],
+      "name": "g000002",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000002",
+        "request_1[0]"
+      ],
+      "name": "g000003",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_0[0]",
+        "g000003"
+      ],
+      "name": "g000004",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_0[0]",
+        "request_1[0]"
+      ],
+      "name": "g000005",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000005"
+      ],
+      "name": "g000006",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000006",
+        "request_2[0]"
+      ],
+      "name": "g000007",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_0[0]",
+        "g000007"
+      ],
+      "name": "g000008",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000005",
+        "request_2[0]"
+      ],
+      "name": "g000009",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_1[0]",
+        "request_1[0]"
+      ],
+      "name": "g000010",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000004",
+        "g000010"
+      ],
+      "name": "g000011",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_1[0]"
+      ],
+      "name": "g000012",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000012",
+        "request_2[0]"
+      ],
+      "name": "g000013",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_1[0]",
+        "g000013"
+      ],
+      "name": "g000014",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000008",
+        "g000014"
+      ],
+      "name": "g000015",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_1[0]",
+        "request_2[0]"
+      ],
+      "name": "g000016",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000016"
+      ],
+      "name": "g000017",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000017",
+        "request_0[0]"
+      ],
+      "name": "g000018",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_1[0]",
+        "g000018"
+      ],
+      "name": "g000019",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000001",
+        "g000019"
+      ],
+      "name": "g000020",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000016",
+        "request_0[0]"
+      ],
+      "name": "g000021",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_2[0]",
+        "request_2[0]"
+      ],
+      "name": "g000022",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000015",
+        "g000022"
+      ],
+      "name": "g000023",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_2[0]"
+      ],
+      "name": "g000024",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000024",
+        "request_0[0]"
+      ],
+      "name": "g000025",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_2[0]",
+        "g000025"
+      ],
+      "name": "g000026",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000020",
+        "g000026"
+      ],
+      "name": "g000027",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "request_0[0]",
+        "request_2[0]"
+      ],
+      "name": "g000028",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000028"
+      ],
+      "name": "g000029",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000029",
+        "request_1[0]"
+      ],
+      "name": "g000030",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "$turn_2[0]",
+        "g000030"
+      ],
+      "name": "g000031",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000011",
+        "g000031"
+      ],
+      "name": "g000032",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000028",
+        "request_1[0]"
+      ],
+      "name": "g000033",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "g000032"
+      ],
+      "name": "g000034",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000034"
+      ],
+      "name": "g000035",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "stall[0]"
+      ],
+      "name": "g000036",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "reset[0]"
+      ],
+      "name": "g000037",
+      "op": "NOT",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000036",
+        "g000037"
+      ],
+      "name": "g000038",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000038",
+        "resource_ready[0]"
+      ],
+      "name": "g000039",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "g000039"
+      ],
+      "name": "g000040",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000039"
+      ],
+      "name": "g000041",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000039"
+      ],
+      "name": "g000042",
+      "op": "AND",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000040",
+        "g000041"
+      ],
+      "name": "g000043",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000042",
+        "g000043"
+      ],
+      "name": "g000044",
+      "op": "OR",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000044",
+        "$turn_0[0]",
+        "g000042"
+      ],
+      "name": "g000045",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000044",
+        "$turn_1[0]",
+        "g000040"
+      ],
+      "name": "g000046",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000044",
+        "$turn_2[0]",
+        "g000041"
+      ],
+      "name": "g000047",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "reset[0]",
+        "g000045",
+        "@1"
+      ],
+      "name": "g000048",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "reset[0]",
+        "g000046",
+        "@0"
+      ],
+      "name": "g000049",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "reset[0]",
+        "g000047",
+        "@0"
+      ],
+      "name": "g000050",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[0]"
+      ],
+      "name": "g000051",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[1]"
+      ],
+      "name": "g000052",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[2]"
+      ],
+      "name": "g000053",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[3]"
+      ],
+      "name": "g000054",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[4]"
+      ],
+      "name": "g000055",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[5]"
+      ],
+      "name": "g000056",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[6]"
+      ],
+      "name": "g000057",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000027",
+        "@0",
+        "payload_0[7]"
+      ],
+      "name": "g000058",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000051",
+        "payload_1[0]"
+      ],
+      "name": "g000059",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000052",
+        "payload_1[1]"
+      ],
+      "name": "g000060",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000053",
+        "payload_1[2]"
+      ],
+      "name": "g000061",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000054",
+        "payload_1[3]"
+      ],
+      "name": "g000062",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000055",
+        "payload_1[4]"
+      ],
+      "name": "g000063",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000056",
+        "payload_1[5]"
+      ],
+      "name": "g000064",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000057",
+        "payload_1[6]"
+      ],
+      "name": "g000065",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "g000058",
+        "payload_1[7]"
+      ],
+      "name": "g000066",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000059",
+        "payload_2[0]"
+      ],
+      "name": "g000067",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000060",
+        "payload_2[1]"
+      ],
+      "name": "g000068",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000061",
+        "payload_2[2]"
+      ],
+      "name": "g000069",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000062",
+        "payload_2[3]"
+      ],
+      "name": "g000070",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000063",
+        "payload_2[4]"
+      ],
+      "name": "g000071",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000064",
+        "payload_2[5]"
+      ],
+      "name": "g000072",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000065",
+        "payload_2[6]"
+      ],
+      "name": "g000073",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000066",
+        "payload_2[7]"
+      ],
+      "name": "g000074",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000032",
+        "@0",
+        "@1"
+      ],
+      "name": "g000075",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "g000075",
+        "@0"
+      ],
+      "name": "g000076",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000023",
+        "@0",
+        "@1"
+      ],
+      "name": "g000077",
+      "op": "MUX",
+      "origin": ""
+    },
+    {
+      "inputs": [
+        "g000035",
+        "g000038"
+      ],
+      "name": "g000078",
+      "op": "AND",
+      "origin": ""
+    }
+  ],
+  "outputs": {
+    "grant_0": [
+      "g000040"
+    ],
+    "grant_1": [
+      "g000041"
+    ],
+    "grant_2": [
+      "g000042"
+    ],
+    "resource_valid": [
+      "g000078"
+    ],
+    "selected_client": [
+      "g000076",
+      "g000077"
+    ],
+    "selected_payload": [
+      "g000067",
+      "g000068",
+      "g000069",
+      "g000070",
+      "g000071",
+      "g000072",
+      "g000073",
+      "g000074"
+    ]
+  },
+  "registers": {
+    "turn_0": {
+      "init": 1,
+      "next": [
+        "g000048"
+      ]
+    },
+    "turn_1": {
+      "init": 0,
+      "next": [
+        "g000049"
+      ]
+    },
+    "turn_2": {
+      "init": 0,
+      "next": [
+        "g000050"
+      ]
+    }
+  },
+  "submodules": {},
+  "version": 2
+}

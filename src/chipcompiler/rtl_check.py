@@ -64,6 +64,62 @@ def make_transaction_vectors(d:DLS, count:int=64, seed:int=2781)->list[dict]:
     return vectors
 
 
+
+def make_fabric_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
+    """Deterministic clock-edge requests and environment-driven responses.
+
+    Simulates real ready/valid acceptance, including stable external data
+    during backpressure. This builds *stimulus*, not expected RTL outputs;
+    expected values come from separately executing the serialized DLS.
+    """
+    if not 32<=count<=256:
+        raise ValueError('Concurrent fabric requires 32..256 RTL stimulus cycles.')
+    rng=random.Random(seed)
+    spec=d.metadata['schedule'];clients=spec['clients'];width=spec['width']
+    external=spec['operator']=='external'
+    sim=d.new_simulator();result=[]
+    # Track one outstanding external service operation, independent from DLS.
+    outstanding=None
+    due=0
+    accepted_requests=0
+    responses=0
+    for clock in range(count):
+        v={k:0 for k in d.inputs}
+        v['reset']=int(clock==0 or clock==count//2)
+        v['stall']=int(clock%19==11)
+        for i in range(clients):
+            v[f'response_ready_{i}']=int(clock%11 not in (2,3,4))
+        if external:
+            v['operator_request_ready']=int(clock%13 not in (4,5,6))
+            if outstanding is not None and clock>=due:
+                v['operator_response_valid']=1
+                v['operator_response_data']=outstanding
+        observed=sim.step(v,clock=False)
+        for i in range(clients):
+            # Issuing clients only drive request when their slot is free.
+            # During accepted transactions their live inputs may change freely.
+            if observed[f'request_ready_{i}'] and not v['reset'] and clock%5 in (0,1,2):
+                v[f'request_{i}']=1
+                v[f'opcode_{i}']=(clock+i)%4
+                v[f'a_{i}']=rng.randrange(1<<width)
+                v[f'b_{i}']=rng.randrange(1<<width)
+                accepted_requests+=1
+        observed=sim.step(v,clock=False)
+        if external and observed['operator_request_valid'] and v['operator_request_ready']:
+            if outstanding is not None:
+                raise ValueError('Stimulus attempted overlapping external ALU operations.')
+            a=observed['operator_request_a'];b=observed['operator_request_b']
+            outstanding=(a*b if observed['operator_request_opcode']&1 else a+b)&((1<<width)-1)
+            due=clock+1+(clock%7)
+        if external and observed['operator_response_ready'] and v['operator_response_valid']:
+            outstanding=None;responses+=1
+        result.append(v)
+        sim.step(v,clock=True)
+        if v['reset']:outstanding=None
+    if accepted_requests<3:
+        raise ValueError('Fabric stimulus contained too few accepted requests.')
+    return result
+
 def make_testbench(d:DLS,vectors:list[dict])->str:
     d.validate()
     if not vectors:raise ValueError('No RTL test vectors provided.')
@@ -104,6 +160,7 @@ def check_rtl(d:DLS,rtl:Path,out:Path,issues,events,run_options:dict|None=None,
     scheduling=(d.metadata.get('schedule') or {}).get('mode')
     try:
         vectors=(make_transaction_vectors(d,vector_count) if scheduling in ('transactional','time_share')
+                 else make_fabric_vectors(d,max(vector_count,32)) if scheduling=='concurrent_fabric'
                  else make_vectors(d,vector_count) if not scheduling
                  else None)
     except ValueError as exc:

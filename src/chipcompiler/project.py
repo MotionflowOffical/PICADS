@@ -125,11 +125,11 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
         for field in scheduling:
             if field not in ('pipeline_stages','mode','latencies','ready_types'):
                 issues.add('CO.SCHEDULE_UNKNOWN','ERROR','CO','load',f'Unsupported schedule directive {field!r}; not applied.',file=co_path)
-        if scheduling.get('mode','spatial') not in ('spatial','time_share','transactional'):
+        if scheduling.get('mode','spatial') not in ('spatial','time_share','transactional','concurrent_fabric'):
             issues.add('CO.SCHEDULE_MODE','ERROR','CO','load',
-                       'schedule.mode must be spatial, time_share or transactional.',file=co_path)
+                       'schedule.mode must be spatial, time_share, transactional or concurrent_fabric.',file=co_path)
         count=scheduling.get('pipeline_stages',0)
-        if scheduling.get('mode') in ('time_share','transactional') and count:
+        if scheduling.get('mode') in ('time_share','transactional','concurrent_fabric') and count:
             issues.add('CO.SCHEDULE_CONFLICT','ERROR','CO','load',
                        'Time-shared/transactional modes do not accept pipeline_stages.',file=co_path,
                        remedy='Use schedule.mode: time_share without pipeline_stages, or spatial pipelining.')
@@ -156,7 +156,7 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                        'modules.naming: mcd requires modules.hierarchy: preserve.',file=co_path,
                        remedy='Enable hierarchy preservation to expose named module instances.')
     if isinstance(modules_config,dict) and isinstance(scheduling,dict):
-        if modules_config.get('hierarchy')=='preserve' and (scheduling.get('pipeline_stages',0) or scheduling.get('mode') in ('time_share','transactional')):
+        if modules_config.get('hierarchy')=='preserve' and (scheduling.get('pipeline_stages',0) or scheduling.get('mode') in ('time_share','transactional','concurrent_fabric')):
             issues.add('CO.SCHEDULE_HIERARCHY','ERROR','CO','load',
                        'Automatic logic pipelining with preserved module instances is not yet supported.',file=co_path,
                        cause='The stage allocator does not retime across hierarchical module boundaries.',
@@ -191,8 +191,38 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                 issues.add('CO.CFG_RESOURCE_LIMIT','ERROR','CO','load',
                            'Transactional mode currently implements exactly one shared operator of each used type.',
                            file=co_path,remedy='Set each max_instances value to 1 or omit the limits.')
+    fabric=co.get('fabric',{})
+    if scheduling.get('mode')=='concurrent_fabric':
+        from .concurrent import FabricConfig
+        if not isinstance(fabric,dict):
+            issues.add('CO.FABRIC_FORMAT','ERROR','CO','load',
+                       'fabric must be a mapping.',file=co_path)
+        else:
+            for field in fabric:
+                if field not in ('clients','width','depth','operator'):
+                    issues.add('CO.FABRIC_UNKNOWN','ERROR','CO','load',
+                               f'Unknown fabric setting {field!r}.',file=co_path)
+            if not set(fabric)-{'clients','width','depth','operator'}:
+                try:FabricConfig(**fabric).validate()
+                except (ValueError,TypeError) as exc:
+                    issues.add('CO.FABRIC_CONFIG','ERROR','CO','load',str(exc),file=co_path)
+            if allocation.get('max_instances') or allocation.get('sharing') not in (None,'auto'):
+                issues.add('CO.FABRIC_ALLOCATION','ERROR','CO','load',
+                    'concurrent_fabric defines one operator and one memory port; generic allocation directives are not supported.',file=co_path)
+            if modules_config.get('hierarchy','flatten')!='flatten' or modules_config.get('naming','function')!='function':
+                issues.add('CO.FABRIC_HIERARCHY','ERROR','CO','load',
+                    'concurrent_fabric cannot be combined with source module hierarchy settings.',file=co_path)
+            if memory:
+                issues.add('CO.FABRIC_MEMORY','ERROR','CO','load',
+                    'Set fabric.depth and fabric.width, not memory, for concurrent_fabric.',file=co_path)
+            if scheduling.get('latencies') or scheduling.get('ready_types'):
+                issues.add('CO.FABRIC_LATENCY','ERROR','CO','load',
+                    'Use the external operator ready/valid protocol, not reservation latency settings.',file=co_path)
+    elif fabric:
+        issues.add('CO.FABRIC_MODE','ERROR','CO','load',
+                   'fabric settings require schedule.mode: concurrent_fabric.',file=co_path)
     for field in co:
-        if field not in ('architecture','allocation','schedule','modules','memory'):
+        if field not in ('architecture','allocation','schedule','modules','memory','fabric'):
             issues.add('CO.UNSUPPORTED_DIRECTIVE','WARNING','CO','load',
                        f'CO directive {field!r} is not implemented and will NOT affect the generated circuit.',
                        file=co_path,remedy='Remove this directive or add an adapter that interprets and validates it.')

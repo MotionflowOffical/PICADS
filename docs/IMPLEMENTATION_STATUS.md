@@ -1,25 +1,20 @@
-# Implementation status — v0.7.0
+# Current implementation status — v0.8.0
 
-| Subsystem | Demonstrated status |
-|---|---|
-| Procedural primitive logic construction | Tested, restricted subset |
-| Executable DLS / register simulation | Tested, including nested clocked hierarchy |
-| MCD hardware networks | Typed explicit networks tested; partial automatic unique-width inference |
-| CO transactional CFG scheduler | Working restricted one-transaction FSM with real gate-level logic |
-| Branch-dependent execution | Tested (unselected branches do not execute memory operations) |
-| Resource allocation | One shared physical gate network per operation kind, inside transactional controller |
-| Operation latency/backpressure | Tested logical reservation and `unit_ready`, NOT physically characterized variable-latency unit |
-| Memory | One on-chip register-bank, synchronous guarded operations, explicit invalid-address fault |
-| Global stall/reset | Tested synchronous active-high reset and state-freezing stall |
-| Cross-module arbitration | Reusable round-robin DLS primitive with MCD explicit network binding; no automatic allocation/queueing |
-| Python frontend | Restricted statically-analyzed hardware subset |
-| C/C++ frontend | Restricted C-compatible subset; tested C transactional example |
-| GUI | Source exists, PySide6 runtime **not tested here** |
-| DLS structural Verilog generation | Tested output, but no independent RTL execution here |
-| External scheduled RTL harness | Implemented/testbench generated; Icarus uninstalled |
-| Yosys/LibreLane adapters | Existing adapters and diagnostics, live tool execution untested |
-| GDSII inspection | Existing structural parser/preview for supported layout shapes |
-| Real physical chip/mask generation | **NOT DEMONSTRATED** |
-| Qualified DRC/LVS/timing/power & foundry signoff | **NOT IMPLEMENTED / NOT VERIFIED** |
+| Subsystem | Evidence-based status |
+| --- | --- |
+| Primitive digital logic and generated DLS | Tested on supported operations; limitations in frontends remain |
+| Sequential DLS hierarchy | Tested including per-instance independent register state |
+| MCD typed module networks | Tested explicit typed logic graphs; auto complex arbitration wiring incomplete |
+| CO transactional CFG | One task in flight, guards and internal memory; tested restricted subset |
+| CO concurrent service fabric | NEW, gate-level tested 2..8 clients, parallel ALU/memory domains, bounded buffering and fair arbitration |
+| Variable-latency interface | NEW external ready/valid operator; sampled DLS tests, physical IP link and RTL check unverified here |
+| Memory-port arbitration | NEW local synchronous single-port bank, invalid address detection; not external SRAM or general multi-port coordination |
+| Python/C/C++ source synthesis | Restricted documented static subsets; general HLS not complete |
+| GUI | Added resource fabric inspector; runtime not verified locally (missing PySide6) |
+| Diagnostics and recovery | Regression-tested core; automatic native logs and bundled diagnostic runner added |
+| Structural Verilog export | Generated and syntactically inspected; real Icarus/Yosys execution unavailable locally |
+| Yosys/LibreLane/OpenROAD | Adapters exist; native runtime unverified here |
+| GDSII preview | Partial read-only geometry preview, not physical signoff |
+| Custom TFT PDK, qualified masks and foundry signoff | Not implemented |
 
-The new work is **not** a complete unconstrained general high-level synthesis tool. See `NEXT_IMPLEMENTATION.md`.
+**Do not treat `compile` success or a screenshot as proof of physical correctness.** For native proof, execute `RUN_FULL_VALIDATION.bat` on an environment with the required tools and return its ZIP report. See `FULL_VALIDATION_v0.8.0.md`.

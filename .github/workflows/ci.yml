@@ -1,0 +1,36 @@
+name: Chip Compiler CI
+on:
+  push:
+  pull_request:
+jobs:
+  cross-platform-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.12', '3.13']
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install verified language and Qt dependencies
+        run: python -m pip install -e ".[gui,test]"
+      - name: Run compiler and GUI construction tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m pytest -q
+      - name: Compile both source frontends
+        shell: bash
+        run: |
+          python -m chipcompiler compile examples/conditional_alu
+          python -m chipcompiler compile examples/c_arithmetic
+          python -m chipcompiler compile examples/explicit_network
+          python -m chipcompiler compile examples/transactional_c
+          python -m chipcompiler compile examples/concurrent_fabricontroller
+          python -m chipcompiler compile examples/transactional_memory
+          python -m chipcompiler compile examples/transactional_c
+          python -m chipcompiler compile examples/concurrent_fabric
+      - name: Diagnose external tool availability (informational)
+        run: python -m chipcompiler doctor

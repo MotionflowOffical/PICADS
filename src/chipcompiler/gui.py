@@ -178,6 +178,7 @@ class Window(QMainWindow):
         self.tabs.addTab(self._build_page(),'Build / Export')
         self.tabs.addTab(self._history_page(),'History / Recovery')
         self.tabs.addTab(self._settings_page(),'Settings')
+        self.tabs.addTab(self._fabric_page(),'Concurrent Fabric')
         self.setCentralWidget(self.tabs)
         self.project_tree=QTreeWidget();self.project_tree.setHeaderLabels(['Project files']);self.project_tree.itemDoubleClicked.connect(self.open_tree_item)
         self._dock('Project Explorer',self.project_tree,Qt.DockWidgetArea.LeftDockWidgetArea)
@@ -233,7 +234,7 @@ class Window(QMainWindow):
         self.action('Synthesize with Yosys',lambda:self.build('build'),build)
         self.action('Physical Implement',lambda:self.build('physical'),build)
         view=m.addMenu('View')
-        for idx,text in enumerate(['Code + Logic Graph','Architecture / Dependencies','Simulate / Debug','Physical / Masks','Build / Export','History / Recovery','Settings']):
+        for idx,text in enumerate(['Code + Logic Graph','Architecture / Dependencies','Simulate / Debug','Physical / Masks','Build / Export','History / Recovery','Settings','Concurrent Fabric']):
             self.action(text,lambda checked=False,i=idx:self.tabs.setCurrentIndex(i),view)
 
     def populate_tree(self):
@@ -345,7 +346,7 @@ class Window(QMainWindow):
         if 'dls' in report.files:
             try:
                 self.dls=DLS.load(Path(report.files['dls']));self.graph.show_dls(self.dls)
-                self._fill_inspector();self._fill_architecture();self._fill_simulation_signals()
+                self._fill_inspector();self._fill_architecture();self._fill_simulation_signals();self._fill_fabric_state()
             except Exception as exc:
                 self.logview.appendPlainText(f'[ERROR] GUI could not load generated DLS: {exc}')
         self.populate_tree();self.refresh_history()
@@ -469,6 +470,7 @@ class Window(QMainWindow):
         self.simstate=self.dls.new_simulator() if self.dls else None;self.simresults.setRowCount(0)
         self.sim_vectors=[];self.sim_outputs=[]
         self.simwave.setRowCount(0);self.simwave.setColumnCount(1)
+        self._fill_fabric_state()
     def update_signal_history(self):
         if self.dls is None:return
         names=[*self.dls.inputs,*self.dls.outputs]
@@ -504,8 +506,50 @@ class Window(QMainWindow):
             idx=self.simresults.rowCount();self.simresults.insertRow(idx)
             for col,txt in enumerate([str(self.simstate.cycle),json.dumps(inp),json.dumps(result),json.dumps(self.simstate.register_snapshot(),sort_keys=True)]):
                 self.simresults.setItem(idx,col,QTableWidgetItem(txt))
-            self.simresults.scrollToBottom();self.update_signal_history();self.tabs.setCurrentIndex(2)
+            self.simresults.scrollToBottom();self.update_signal_history();self._fill_fabric_state();self.tabs.setCurrentIndex(2)
         except Exception as exc:QMessageBox.critical(self,'DLS simulation error',f'{type(exc).__name__}: {exc}')
+
+    def _fabric_page(self):
+        widget=QWidget();layout=QVBoxLayout(widget)
+        title=QLabel('Concurrent Resource Fabric — live execution state')
+        title.setObjectName('section');layout.addWidget(title)
+        layout.addWidget(QLabel('Actual DLS simulation signals. Each client holds at most one outstanding request; arbitration and memory are separate ports.'))
+        self.fabric_grid=QTableWidget(0,8)
+        self.fabric_grid.setHorizontalHeaderLabels(['Client','Ready','Pending','Active','Response valid','Data','Fault','Register snapshot'])
+        layout.addWidget(self.fabric_grid,2)
+        self.fabric_protocol_report=QPlainTextEdit();self.fabric_protocol_report.setReadOnly(True)
+        self.fabric_protocol_report.setPlainText('Generate a concurrent_fabric CO design to see resource protocol evidence.')
+        layout.addWidget(self.fabric_protocol_report,1)
+        actions=QHBoxLayout()
+        for label,action in [('Refresh state',self._fill_fabric_state),
+                             ('Open simulation inputs',lambda:self.tabs.setCurrentIndex(2)),
+                             ('Show build results',lambda:self.tabs.setCurrentIndex(4))]:
+            button=QPushButton(label);button.clicked.connect(action);actions.addWidget(button)
+        layout.addLayout(actions)
+        return widget
+
+    def _fill_fabric_state(self):
+        if not hasattr(self,'fabric_grid'):return
+        self.fabric_grid.setRowCount(0)
+        if not self.dls or (self.dls.metadata.get('schedule') or {}).get('mode')!='concurrent_fabric':
+            self.fabric_protocol_report.setPlainText('This is not a concurrent_fabric design. Generate the included concurrent_fabric example to inspect its live controller.')
+            return
+        count=self.dls.metadata['schedule']['clients']
+        signals=self.simstate.last_outputs if self.simstate else {}
+        regs=self.simstate.register_snapshot() if self.simstate else {}
+        for i in range(count):
+            self.fabric_grid.insertRow(i)
+            rdata={name:value for name,value in regs.items() if name.endswith('_'+str(i)) or name.endswith('_'+str(i)+'[0]')}
+            values=[str(i),signals.get(f'request_ready_{i}'),signals.get(f'pending_{i}'),
+                    signals.get(f'active_{i}'),signals.get(f'response_valid_{i}'),
+                    signals.get(f'response_data_{i}'),signals.get(f'response_fault_{i}'),rdata]
+            for col,value in enumerate(values):
+                self.fabric_grid.setItem(i,col,QTableWidgetItem(str(value)))
+        report=self.root/'build'/'latest'/'fabric_protocol.json'
+        if report.is_file():
+            try:self.fabric_protocol_report.setPlainText(report.read_text(encoding='utf-8')[:50000])
+            except OSError as exc:self.fabric_protocol_report.setPlainText(f'Cannot read protocol evidence: {exc}')
+        else:self.fabric_protocol_report.setPlainText('No completed protocol verification artifact exists.')
 
     def _physical_page(self):
         w=QWidget();v=QVBoxLayout(w)
