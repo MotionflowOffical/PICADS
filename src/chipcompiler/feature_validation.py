@@ -18,12 +18,13 @@ import sys
 import tempfile
 import traceback
 import zipfile
+import xml.etree.ElementTree as ET
 
 from .dependencies import probe_tools
 from .project import atomic_write
 
 ROOT=Path(__file__).resolve().parents[2]
-VERSION='0.16.4'
+VERSION='0.16.5'
 
 
 def _invoke(command:list[str],directory:Path,env:dict,log:Path,timeout:int)->dict:
@@ -109,17 +110,63 @@ def _exercise_cli(tmp:Path,env:dict,logs:Path)->dict:
     return stages
 
 
-def _pytest_files(logs:Path,env:dict,include_legacy:bool)->dict:
-    result={}
-    tests=['tests/test_iteration15.py','tests/test_windows_installer.py']
-    if include_legacy:
-        tests += [str(path.relative_to(ROOT)) for path in sorted((ROOT/'tests').glob('test_*.py'))
-                  if path.name not in ('test_iteration15.py','test_windows_installer.py','test_gui_smoke.py','test_gui_workflow.py','test_gui_dependency_installer.py')]
-    for name in tests:
-        ident=Path(name).stem
-        step=_invoke([sys.executable,'-m','pytest','-q','-ra',name],ROOT,env,logs/(ident+'.log'),240)
-        result[ident]=step
+def _pytest_result(logs: Path, env: dict, files: list[str], *, label: str,
+                   timeout: int = 300) -> dict:
+    """Run exact user-facing feature tests and retain per-case JUnit evidence.
+
+    A regression test's assumptions about the user's install must not become
+    a false v1 feature failure. Run the independently specified v1 contracts.
+    """
+    xml_path = logs / (label + '.xml')
+    cmd = [sys.executable, '-m', 'pytest', '-q', '-ra',
+           f'--junitxml={xml_path}', *files]
+    result = _invoke(cmd, ROOT, env, logs / (label + '.log'), timeout)
+    if xml_path.is_file():
+        try:
+            tree = ET.parse(xml_path)
+            suites = tree.getroot()
+            cases = []
+            for case in suites.iter('testcase'):
+                failure = case.find('failure')
+                error = case.find('error')
+                skip = case.find('skipped')
+                state = 'FAIL' if failure is not None or error is not None else 'SKIP' if skip is not None else 'PASS'
+                reason = next((node for node in (failure, error, skip) if node is not None), None)
+                cases.append({'name': case.get('name'), 'class': case.get('classname'),
+                              'status': state, 'reason': reason.get('message') if reason is not None else None})
+            result['cases'] = cases
+            result['case_counts'] = {status: sum(c['status'] == status for c in cases)
+                                     for status in ('PASS', 'FAIL', 'SKIP')}
+            if not cases:
+                result['status'] = 'FAIL'
+                result['reason'] = 'pytest did not report any executed test cases'
+        except (ET.ParseError, OSError) as exc:
+            result['status'] = 'FAIL'
+            result['reason'] = f'Cannot parse JUnit report: {exc}'
+    elif result['status'] == 'PASS':
+        result['status'] = 'FAIL'
+        result['reason'] = 'pytest returned success without creating per-test report'
+    result['junit_xml'] = xml_path.name
     return result
+
+
+def _feature_contracts(logs: Path, env: dict) -> dict:
+    return _pytest_result(logs, env, ['tests/test_v1_feature_matrix.py'],
+                          label='v1_feature_matrix', timeout=240)
+
+
+def _historical_regressions(logs: Path, env: dict) -> dict:
+    """Optional maintenance check only; never included in the default suite."""
+    results = {}
+    excluded = {'test_v1_feature_matrix.py', 'test_gui_smoke.py',
+                'test_gui_workflow.py', 'test_gui_dependency_installer.py'}
+    for file in sorted((ROOT / 'tests').glob('test_*.py')):
+        if file.name in excluded:
+            continue
+        results[file.stem] = _pytest_result(logs, env,
+            [str(file.relative_to(ROOT))], label='historical_' + file.stem,
+            timeout=300)
+    return results
 
 
 def _gui_tests(logs:Path,env:dict)->dict:
@@ -129,9 +176,10 @@ def _gui_tests(logs:Path,env:dict)->dict:
     gui_env=dict(env)
     gui_env['QT_QPA_PLATFORM']='offscreen'
     gui_env['PICADS_GUI_EVIDENCE_DIR']=str(logs)
-    run=_invoke([sys.executable,'-m','pytest','-q','-ra',
-                 'tests/test_gui_smoke.py','tests/test_gui_workflow.py','tests/test_gui_dependency_installer.py'],ROOT,gui_env,logs/'gui_workflow.log',300)
-    return run
+    return _pytest_result(logs, gui_env,
+            ['tests/test_gui_smoke.py', 'tests/test_gui_workflow.py',
+             'tests/test_gui_dependency_installer.py'],
+            label='gui_workflow', timeout=300)
 
 
 def _native_alu(logs:Path)->dict:
@@ -212,7 +260,7 @@ def run_validation(destination:Path,*,full_regression=False,native=True,gui=True
     # subprocesses need real user registrations so they run with original settings.
     summary={'schema':1,'product':'PICADS','version':VERSION,
              'run_utc':datetime.now(timezone.utc).isoformat(),
-             'mode':'automated entrypoint/user journey testing',
+             'mode':'v1.0 feature acceptance and real entrypoint/user journey testing',
              'manufacturing_qualified':False,'statuses':{},
              'explanation':'Logical and GUI feature tests are not physical manufacturing signoff.'}
     statuses=summary['statuses']
@@ -223,10 +271,17 @@ def run_validation(destination:Path,*,full_regression=False,native=True,gui=True
         except BaseException as exc:
             (logs/'cli_exception.txt').write_text(traceback.format_exc(),encoding='utf-8')
             statuses['cli_user_journeys']={'fatal':{'status':'FAIL','reason':str(exc)}}
-        try:statuses['pytest_regressions']=_pytest_files(logs,isolated,full_regression)
+        try:
+            statuses['v1_feature_contracts']=_feature_contracts(logs,isolated)
         except BaseException as exc:
             (logs/'pytest_exception.txt').write_text(traceback.format_exc(),encoding='utf-8')
-            statuses['pytest_regressions']={'fatal':{'status':'FAIL','reason':str(exc)}}
+            statuses['v1_feature_contracts']={'status':'FAIL','reason':str(exc)}
+        if full_regression:
+            try:
+                statuses['optional_historical_regressions']=_historical_regressions(logs,isolated)
+            except BaseException as exc:
+                (logs/'historical_exception.txt').write_text(traceback.format_exc(),encoding='utf-8')
+                statuses['optional_historical_regressions']={'status':'FAIL','reason':str(exc)}
         if gui:
             try:statuses['gui_robot']=_gui_tests(logs,isolated)
             except BaseException as exc:statuses['gui_robot']={'status':'FAIL','reason':repr(exc)}
@@ -254,9 +309,31 @@ def run_validation(destination:Path,*,full_regression=False,native=True,gui=True
             if 'status' in node:leaf.append(node['status'])
             else:
                 for value in node.values():walk(value)
-    for name in ('cli_user_journeys','pytest_regressions','gui_robot','native_alu','native_toolchain'):
+    for name in ('cli_user_journeys','v1_feature_contracts','gui_robot','native_alu','native_toolchain'):
         walk(statuses[name])
+    if full_regression:
+        walk(statuses['optional_historical_regressions'])
+    # All default stages are user-facing v1.0 contracts. Previous feature
+    # history remains available exclusively through --full-regression.
+    # In particular a normal run does not call _historical_regressions().
     summary['counts']={x:leaf.count(x) for x in sorted(set(leaf))}
+    cases=statuses.get('v1_feature_contracts',{}).get('cases',[])
+    gui_cases=statuses.get('gui_robot',{}).get('cases',[])
+    native_acceptance=statuses.get('native_toolchain',{}).get('native_stages',{})
+    matrix={
+      'scope':'v1.0 essential functions; no historical regression cases in default run',
+      'contract_cases':cases, 'gui_cases':gui_cases,
+      'native_alu':statuses.get('native_alu'),
+      'native_physical_stages':native_acceptance,
+      'guarantees':{
+        'independent_dls_oracle':'exhaustive 1024 combinations for bundled ALU',
+        'rtl':'independent native Icarus only when installed',
+        'synthesis':'native Yosys only when installed',
+        'layout':'real PDK-backed LibreLane attempt, otherwise PARTIAL',
+        'signoff':'not automatically guaranteed by logic tests',
+      },
+    }
+    atomic_write(logs/'v1_capability_matrix.json', json.dumps(matrix,indent=2,default=str))
     summary['overall']='FAIL' if 'FAIL' in leaf else 'PARTIAL' if any(x!='PASS' for x in leaf) else 'PASS_EXECUTED_CHECKS'
     atomic_write(output/'summary.json',json.dumps(summary,indent=2,default=str))
     atomic_write(output/'HOW_TO_REPORT.txt',
@@ -317,8 +394,8 @@ def _emergency_report(destination:Path,exc:BaseException)->Path:
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Automated PICADS v1 feature and physical acceptance testing')
-    parser.add_argument('--output',default='validation/PICADS_v0.16.3_automated_diagnostics')
-    parser.add_argument('--full-regression',action='store_true',help='Additionally run all historical regression files individually (can be slow)')
+    parser.add_argument('--output',default='validation/PICADS_v0.16.5_automated_diagnostics')
+    parser.add_argument('--full-regression',action='store_true',help='Optional developer maintenance only: historical regression files (NOT default feature verification)')
     parser.add_argument('--skip-native',action='store_true',help='Skip real Icarus/Yosys/LibreLane native tool check')
     parser.add_argument('--skip-gui',action='store_true',help='Skip Qt automated user journeys')
     parser.add_argument('--pdk',default='sky130A')

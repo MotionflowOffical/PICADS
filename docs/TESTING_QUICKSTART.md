@@ -1,27 +1,36 @@
-# PICADS v0.16.3 — Windows test quick start
+# PICADS v0.16.5 — Windows v1.0 feature verification
 
-## What to do
+This is a **functional acceptance test**, not the historical iteration-by-iteration test suite.
+It runs on temporary project copies and **does not modify your chip projects or installed dependencies**.
 
-1. **Extract** `PICADS_Source_v0.16.3.zip` completely (do not run the batch file inside a ZIP preview).
-2. Have **Python 3.10+** installed. The launcher checks for PySide6, pytest, PyYAML, and pycparser and offers automatic user-profile installation if missing.
-3. Optional but recommended: run `RUN_GUI.bat`, open **Settings → External Dependencies**, and register **Icarus (`iverilog` and `vvp`), Yosys, LibreLane** and a compatible PDK using **Choose App / Choose Folder**. Native checks are marked unavailable if these are absent.
-4. Double-click **`RUN_PICADS_AUTOTEST.bat`**. Do not close the console while tests are running; native place/route may take a long time.
-5. **Upload exactly one file**: `validation/PICADS_v0.16.3_automated_diagnostics.zip`.
+## Run the automatic feature test
 
-## What's inside the one ZIP
+1. Close other instances of PICADS (to avoid competing native tools), then open the PICADS source folder.
+2. Double-click **`RUN_PICADS_AUTOTEST.bat`** (equivalent: `RUN_TESTS.bat`).
+3. If Python's GUI/test modules are missing, allow the setup prompt to install them. No native EDA tools or PDK are installed by this script.
+4. When finished, upload **only** `validation/PICADS_v0.16.5_automated_diagnostics.zip`.
 
-- `summary.json`: PASS/FAIL/UNAVAILABLE/PARTIAL for each check.
-- `HOW_TO_REPORT.txt` and `FILE_MANIFEST.json`: how to share it, included files, SHA-256 checksums.
-- `launcher.log` and, when needed, `python_setup.log`: startup and dependency-installation diagnostics.
-- `evidence/*.log`, `evidence/installed_tools.json`: compiler/simulator outputs, fault injection, tool detection and native tool output.
-- `evidence/alu_generated/`: the actual generated Verilog (`.v`), DLS (`.dls`), waveform (`.vcd`), reports and copied source-only ALU inputs.
-- `evidence/physical_native_acceptance/`: first-chip RTL, synthesis, and LibreLane/PDK result evidence where generated, including a small GDS file when available; no proprietary PDK files are copied.
-- GUI test logs and screenshots if a Qt runtime is available.
+**One ZIP contains everything needed:** `summary.json`, `evidence/v1_capability_matrix.json`, individual test results in JUnit XML, real CLI logs, Qt automation results/screenshots where available, a generated ALU's Verilog/DLS/VCD, compiler error/recovery evidence, registered tool availability, native Icarus/Yosys results and the v1.0 physical-layout acceptance evidence when supported.
 
-You should **not** need to send screenshots, log files, or multiple separate archives. Upload this ZIP even when tests show **FAIL** or **PARTIAL**. A partial result is expected without external EDA tools.
+A `PARTIAL` result is expected without LibreLane and a valid PDK. A `FAIL` result should be investigated even when the physical backend is unavailable. The test distinguishes missing tools from failing ones.
 
-## Manual verification (separate from automated test)
+## What is automatically checked?
 
-Run `RUN_GUI.bat`, open `examples/alu_slice_component`, compile the design, simulate ADD/SUB/AND/XOR, and inspect the DLS/Verilog. Report GUI usability observations in the chat; the single ZIP is still the automated diagnostic attachment.
+- Opening/importing supported Python and C project examples and generating real DLS + Verilog.
+- MCD network composition and hierarchy; CO transactional controllers, local memory, and shared operators/memory.
+- 1,024 independently calculated ALU truth-table cases.
+- Simulation, waveform export, source errors, invalid signals and recovery without stale RTL.
+- Safe dependency registration and clearing in isolated settings; physical-flow preflight must reject missing prerequisites.
+- GUI source editing via real keyboard events, save/build, graph visualization, simulator, error recovery, dependency Settings and project switching **when Qt is installed**.
+- Actual Icarus RTL tests and Yosys synthesis when registered; physical placement/routing/signoff attempted only when LibreLane and a PDK are configured.
+- Archive completeness and SHA-256 manifest verification.
 
-**Privacy:** the report may contain Windows installation paths and executable names. It does not intentionally copy unrelated projects, PDK binaries, credentials, or environment variables. Inspect the ZIP before sharing if folder names are sensitive.
+`--full-regression` is **only an optional developer maintenance mode**. It is not part of normal v1.0 feature verification. The dedicated `RUN_V1_ACCEPTANCE.bat` remains available for a separate physical-flow re-test.
+
+## Interpreting results
+
+- `PASS_EXECUTED_CHECKS` — the executed checks passed, **not** a statement that physical signoff is qualified.
+- `PARTIAL` — an optional/required external component was unavailable or you explicitly skipped a stage.
+- `FAIL` — a required executed check failed or crashed; send the ZIP.
+
+The test runner does not modify the manual Apollo or sensor-processing projects.

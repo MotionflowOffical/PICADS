@@ -59,7 +59,12 @@ def test_gui_edit_save_compile_visualize_simulate(gui,monkeypatch):
     editor=win.editors.currentWidget()
     assert isinstance(editor,CodeEditor)
     original=editor.toPlainText()
-    editor.setPlainText(original.rstrip()+'\n# Edited through the PICADS source editor.\n')
+    # Simulate actual keyboard input. setPlainText() resets Qt's modified flag
+    # because it is a programmatic document replacement, not an editor change.
+    editor.setFocus()
+    cursor=editor.textCursor();cursor.movePosition(cursor.MoveOperation.End);editor.setTextCursor(cursor)
+    QTest.keyClicks(editor, '\n# Edited through the PICADS source editor.\n')
+    app.processEvents()
     assert editor.document().isModified()
     win.save_all()
     assert path.read_text().endswith('# Edited through the PICADS source editor.\n')
@@ -97,14 +102,23 @@ def test_gui_fault_then_recovery_without_stale_success(gui,monkeypatch):
     original=source.read_text()
     win.open_editor(source)
     editor=win.editors.currentWidget()
-    editor.setPlainText('def alu_slice(\n')
+    editor.setFocus()
+    QTest.keyClick(editor, Qt.Key.Key_A, Qt.KeyboardModifier.ControlModifier)
+    QTest.keyClicks(editor, 'def alu_slice(\n')
+    app.processEvents()
+    assert editor.document().isModified()
     win.build('compile')
     report=wait_for_build(app,win)
     assert report.status=='FAILED'
     assert win.problem_tree.topLevelItemCount()>0
     assert win.dls is None, 'A failed build must not expose stale generated logic'
     assert report.stages['export']['status']=='BLOCKED'
-    editor.setPlainText(original)
+    # Undo/replace through an editing operation, not setPlainText(): the
+    # rebuild must actually read the recovered source from the editor.
+    cursor=editor.textCursor();cursor.select(cursor.SelectionType.Document)
+    cursor.insertText(original)
+    app.processEvents()
+    assert editor.document().isModified()
     win.last_report=None
     win.build('compile')
     good=wait_for_build(app,win)
@@ -126,7 +140,10 @@ def test_gui_dependency_choose_folder_and_clear(gui,monkeypatch,tmp_path):
     assert 'AVAILABLE' in win.dependency_table.item(row,1).text()
     assert 'registered' in win.dependency_table.item(row,1).text()
     win.dependency_table.cellWidget(row,4).click()
-    assert 'registered' not in win.dependency_table.item(row,1).text()
+    assert win.dependency_table.item(row,1).text().startswith('UNAVAILABLE'), (
+        win.dependency_table.item(row,1).text())
+    from chipcompiler.dependencies import read_settings
+    assert 'yosys' not in read_settings()['tools']
     evidence=os.getenv('PICADS_GUI_EVIDENCE_DIR')
     if evidence:
         win.tabs.setCurrentIndex(6)

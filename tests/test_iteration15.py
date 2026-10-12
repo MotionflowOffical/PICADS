@@ -96,7 +96,7 @@ def test_rtl_testbench_covers_actual_compiled_interfaces(tmp_path):
 
 
 def test_alu_project_has_only_logic_no_handmade_masks_or_netlists():
-    files={p.relative_to(REFERENCE).as_posix() for p in REFERENCE.rglob('*') if p.is_file() and 'build' not in p.parts}
+    files={p.relative_to(REFERENCE).as_posix() for p in REFERENCE.rglob('*') if p.is_file() and not ({'build','.chipcompiler','.pytest_cache'} & set(p.relative_to(REFERENCE).parts))}
     assert files=={'chip.yaml','design.mcd','architecture.co','circuit.py'}
     assert not (REFERENCE/'build'/'layout.gds').exists()
 

@@ -161,7 +161,7 @@ def probe_tools() -> dict:
 def _portable_windows_environment(activation: str) -> dict:
     """Activate the official OSS CAD Suite environment using a temporary CMD file.
 
-    Feeding `call "C:\path with spaces\environment.bat" && set` directly as
+    Feeding `call "C:/path with spaces/environment.bat" && set` directly as
     cmd.exe's `/c` argument is *not* reliable: cmd has another quote-removal
     pass that can interpret the opening quote as a program name. The temporary
     file makes the nested batch call unambiguous and keeps it out of the shell

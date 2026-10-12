@@ -1,6 +1,16 @@
-# PICADS v0.16.4
+# PICADS v0.16.5
 
 **Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
+
+## v0.16.5 — v1.0 feature verification redesign (Windows test-report fixes)
+
+**Default automated testing now verifies required application functionality rather than historical implementation tests.** Run `RUN_PICADS_AUTOTEST.bat` (or `RUN_TESTS.bat`) to execute the new 18-case v1 functional contract suite, real CLI projects, independent exhaustive ALU oracle, intentional source and wiring faults, and Qt GUI user journeys when available. Icarus/Yosys and a PDK-backed LibreLane run remain conditional on actually installed tools.
+
+**Corrections based on the first Windows diagnostics:** GUI tests now edit through actual Qt keyboard/text-cursor events (not `setPlainText()`, which resets the modified flag); clearing a tool registration is checked structurally instead of looking for the word `registered`; project artifacts under `.chipcompiler/` are not mistaken for prepackaged source; and the optional offline-repair test uses an isolated temporary installation instead of making assumptions about your installed OSS CAD Suite.
+
+The v1.0 tester now stores `v1_feature_matrix.xml`, `v1_capability_matrix.json`, GUI JUnit evidence, hardware artifacts and native logs inside **one** `validation/PICADS_v0.16.5_automated_diagnostics.zip`. Normal runs do **not** execute historical regression suites; `--full-regression` is opt-in developer maintenance. The test runner works on temporary project copies and isolated registry settings. [Testing guide](docs/FEATURE_VERIFICATION_v0.16.5.md).
+
+**Verification limitations:** the new functional Python tests have been run locally; automated real Qt runtime actions and native Windows EDA are to be rechecked on the user's machine. `PARTIAL` without a physical backend is expected. A clean feature test is not manufacturing signoff.
 
 ## v0.16.4 — Windows DLL loading and audit fix
 
@@ -52,7 +62,7 @@ The cumulative previous release added validated PDK/technology and floorplan pre
 
 The release includes an independently specified **4-bit ALU slice** in [`examples/alu_slice_component`](examples/alu_slice_component/circuit.py) (one piece of a future processor, not a complete chip), with its MCD/CO declarations and no handmade RTL or masks. The compiler's DLS passes a separate 1,024-case truth-table check; errors are injected deliberately to test diagnostics.
 
-**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.3_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
+**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.5_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
 
 For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART.md). See [automated acceptance guide](docs/AUTOMATED_V1_VERIFICATION_v0.15.1.md) and [ALU chip-part specification](docs/ALU_SLICE_REFERENCE_v0.15.1.md).
 
@@ -64,7 +74,7 @@ For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART
 2. Run `SETUP_GUI_WINDOWS.bat` to install Python GUI dependencies if necessary.
 3. Run `RUN_GUI.bat` and use **Settings → External Dependencies → Choose App / Choose Folder** to register Icarus (`iverilog` + `vvp`), Yosys, LibreLane, KLayout and other tools you have.
 4. For the first complete hardware-to-GDS test, run **`RUN_V1_ACCEPTANCE.bat`**. It compiles a bundled synchronous example and attempts real RTL/synthesis/physical checks where the required tools and PDK are available.
-5. Return `validation/PICADS_v0.16.3_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
+5. Return `validation/PICADS_v0.16.5_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
 
 To select a target other than the default `sky130A`, run:
 
@@ -81,7 +91,7 @@ python -m pip install -e ".[test,gui]"
 picads doctor
 picads compile examples/first_physical_chip
 picads physical-preflight examples/first_physical_chip
-python -m chipcompiler.acceptance --output validation/PICADS_v0.16.3_v1_acceptance
+python -m chipcompiler.acceptance --output validation/PICADS_v0.16.5_v1_acceptance
 python -m pytest -q tests/test_iteration14.py
 ```
 

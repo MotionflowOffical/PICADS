@@ -1,31 +1,21 @@
 {
   "product": "PICADS",
-  "version": "0.16.4",
-  "format": "flat cumulative source ZIP",
+  "version": "0.16.5",
+  "type": "cumulative source; Windows v1 feature verification patch",
   "changes": [
-    "Fix Windows OSS CAD Suite environment.bat invocation in paths containing spaces via temporary CMD script",
-    "Scope runtime DLL PATH per native tool; prevent KiCad/KLayout/MSYS2 contamination of Yosys and Z3",
-    "Use scoped environment for build, validation, GDS viewer and dependency audit",
-    "Suppress interactive Windows loader dialogs during headless audit when supported",
-    "Classify loader errors 0xC0000135, 0xC0000139, 0xC0000142, 0xC000007B",
-    "Keep existing installed tools; one-command Windows audit with ZIP"
+    "Default automated test runner uses 18-case v1 functional feature matrix, not iteration history",
+    "GUI robot emulates user text edits; updated missing/error/recovery checks",
+    "Correct dependency registration assertion and isolated offline repair test",
+    "Generate JUnit cases, capability matrix and one hash-verified diagnostic ZIP",
+    "Preserve native Icarus/Yosys and conditional PDK-backed LibreLane acceptance"
   ],
   "verification": {
-    "targeted_Dll_environment": "7 targeted tests plus legacy installer/dependency tests passed",
-    "file_group_regression": {
-      "passed": 534,
-      "skipped": 3,
-      "failed_files": [],
-      "skipped_only_files": [
-        "test_gui_workflow.py"
-      ]
-    },
-    "online_windows_executable_startup": "NOT VERIFIED HERE; user Windows audit required",
-    "physical_signoff": "NOT VERIFIED",
-    "user_audit_baseline": {
-      "yosys": "0xC0000135 missing DLL",
-      "z3": "0xC0000139 DLL entry point not found"
-    }
+    "focused_pytest": "44 passed, 3 skipped (local Qt unavailable)",
+    "v1_feature_matrix": "18 passed, 0 failed",
+    "real_windows_gui_tests": "NOT RE-EXECUTED IN THIS ENVIRONMENT; user rerun required",
+    "full_historical_suite": "INCOMPLETE: all-in-one run timed out around 51%; default suite deliberately excludes it",
+    "native_external_eda": "NOT AVAILABLE IN LOCAL ENVIRONMENT; Windows evidence required",
+    "manufacturing_signoff": "NOT IMPLEMENTED"
   },
   "external_binaries_included": false
 }

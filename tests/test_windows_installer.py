@@ -334,11 +334,15 @@ def test_unknown_occupied_directory_never_overwritten(monkeypatch,tmp_path):
     assert (directory/'valuable.txt').read_text()=='remain untouched'
 
 
-def test_offline_repair_cli_is_exposed():
+def test_offline_repair_cli_is_exposed(monkeypatch,tmp_path):
     from chipcompiler.cli import main
+    from chipcompiler import windows_installer as wi
     import contextlib
+    # Never touch the user's actually installed packages in an automated test.
+    # The command is deliberately exercised against a fresh temporary root.
+    monkeypatch.setenv('PICADS_DEPENDENCY_ROOT', str(tmp_path/'empty-managed-root'))
+    monkeypatch.setenv('PICADS_SETTINGS_DIR', str(tmp_path/'settings'))
     with contextlib.redirect_stdout(io.StringIO()):
         rc=main(['dependencies','repair','oss-cad-suite'])
-    # In the test environment the default managed package is absent; verify
-    # command parsing and structured error status rather than downloading.
     assert rc != 0
+    assert not (tmp_path/'empty-managed-root'/'oss-cad-suite').exists()

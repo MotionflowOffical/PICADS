@@ -1,6 +1,6 @@
 @echo off
 setlocal
 cd /d "%~dp0"
-echo PICADS v0.16.4: launching feature and extended regression tests.
-call "%~dp0RUN_PICADS_AUTOTEST.bat" --full-regression --skip-native
+echo PICADS v0.16.5: launching required v1.0 feature verification only.
+call "%~dp0RUN_PICADS_AUTOTEST.bat" %*
 exit /b %ERRORLEVEL%
