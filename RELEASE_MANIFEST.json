@@ -1,27 +1,25 @@
 {
   "product": "PICADS",
   "version": "0.16.8",
-  "type": "cumulative WSL LibreLane detection, GUI/preflight/acceptance integration",
+  "revision": "r4",
+  "type": "portability and storage lifecycle + end-to-end physical build usability",
   "changes": [
-    "Uses standalone Python for WSL name selection and all subsequent WSL commands",
-    "Detects running Docker engines regardless of stale inherited Windows PATH",
-    "Never invokes Docker installer if Docker Desktop is present but CLI/daemon are not ready",
-    "Separately probes Docker inside Ubuntu; suggests enabling official WSL integration",
-    "Invokes managed LibreLane venv directly for Dockerized physical runs; verifies Yosys in WSL",
-    "Preserves Docker/WSL data; smoke PASS marker only after official LibreLane test",
-    "Repairs standalone LibreLane setup import-path mismatch; generated launcher now imports the correctly staged module with legacy alias support",
-    "Reports WSL LibreLane installed after matching smoke test receipt, separately from native Windows executables",
-    "Read-only live WSL/Yosys/Docker/LibreLane diagnostics and one-click batch launcher",
-    "Physical preflight uses project-selected WSL backend and Linux PDK paths, not native Windows executables",
-    "Acceptance runner can select WSL via --execution auto/native/wsl and propagates execution to temporary reference projects"
+    "Explicit user-controlled inventory, uninstall and clean-up for PICADS managed binaries/caches/build artifacts",
+    "WinGet KiCad removal offered only for a matching PICADS-initiated WinGet receipt",
+    "No destructive management of Docker Desktop, images, WSL distro, shared Ciel PDKs, global pip cache, MSYS2 or unrecognized installs",
+    "PICADS-scoped pip download caching for new LibreLane WSL installations",
+    "Explicit SKY130/WSL physical configuration with backed-up chip.yaml",
+    "Windows-to-WSL build directory translation using wslpath with accessibility check",
+    "Visible physical.disabled diagnostics; LibreLane output GDS artifact manifest and layer browser",
+    "Standalone RUN_SKY130_REFERENCE.bat first PICADS chip GDS attempt"
   ],
   "verification": {
-    "targeted_pytest": "97 passed, 2 skipped (Linux local + simulated WSL processes)",
-    "full_historical_pytest": "NOT COMPLETED; run interrupted after >200 tests",
+    "targeted_pytest": "124 passed, 1 skipped (local Linux plus mocked WSL/EDA and GUI)",
     "native_Windows_GUI_and_PICADS_GDS": "NOT RUN on user machine",
-    "user_librelane_smoke_test": "80/80 passed as logged by user on 2026-10-12",
+    "user_librelane_smoke_test": "80/80 stages passed as logged by user on 2026-10-12",
+    "physical_signoff": "NOT VERIFIED",
     "custom_thin_film_fabrication": "NOT VERIFIED"
   },
   "external_binaries_included": false,
-  "revision": "r3"
+  "installation": "Overlay patch on existing PICADS program root. Do not remove dependencies or existing projects."
 }

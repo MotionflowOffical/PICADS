@@ -9,18 +9,62 @@ from .dependencies import resolve_tool, probe_tools, TOOLS, dependency_environme
 def probe()->dict[str,dict]:
     return probe_tools()
 
+def wsl_working_directory(wsl_executable: str, distribution: str | None, directory: Path, *,
+                          runner=None) -> str:
+    """Translate the real Windows build folder into a Linux path for WSL.
+
+    Passing Windows paths to --cd or into Docker bind mounts is not reliable.
+    Use wslpath in the *selected* distribution and confirm the path is visible
+    there. Never run arbitrary shell text derived from the Windows path.
+    """
+    runner = runner or subprocess.run
+    base = [wsl_executable]
+    if distribution:
+        base.extend(['--distribution', distribution])
+    source = str(Path(directory).resolve())
+    try:
+        translated = runner(base + ['--exec', 'wslpath', '-u', source],
+                            capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', timeout=25, check=False)
+        linux = translated.stdout.strip() if translated.returncode == 0 else ''
+        if not linux.startswith('/') or '\n' in linux or '\r' in linux:
+            raise ValueError('wslpath could not translate build directory: '
+                             + (translated.stderr or translated.stdout or source).strip()[-300:])
+        accessible = runner(base + ['--exec', 'test', '-d', linux],
+                            capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', timeout=25, check=False)
+        if accessible.returncode != 0:
+            raise ValueError('PICADS build directory is not visible inside WSL: '
+                             + linux + ' (Windows: ' + source + ')')
+        return linux
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise ValueError(f'Could not inspect WSL build directory {source}: {exc}') from exc
+
+
 def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:EventLog,
                  stage:str,timeout:int=600,runner:str='native',wsl_distribution:str|None=None)->dict:
     assert argv
     requested=list(argv)
+    executable = None
     if runner=='wsl':
-        # The Linux executable is NOT a Windows dependency registration.
-        # Always use argv-based WSL invocation and the PICADS-managed venv for
-        # LibreLane; no sudo-installed /usr/local/bin symlink is required.
-        executable=resolve_tool('wsl.exe') or shutil.which('wsl.exe')
+        # No fallback to a system-wide Linux LibreLane or Docker inside a
+        # different WSL distribution. Every tool shares the selected distro.
+        executable=resolve_tool('wsl.exe') or shutil.which('wsl.exe') or shutil.which('wsl')
         if executable:
+            try:
+                # Only Windows paths need conversion; tests and host-side
+                # helpers on Linux already use POSIX paths.
+                linux_cwd = (wsl_working_directory(executable, wsl_distribution, cwd)
+                             if os.name == 'nt' else str(Path(cwd).resolve()))
+            except ValueError as exc:
+                issue = issues.add('TOOL.WSL_WORKDIR_UNAVAILABLE', 'ERROR',
+                                   'DEPENDENCY', stage, str(exc),
+                                   remedy='Move the project to a local Windows drive accessible under /mnt/ or fix WSL automount; run wslpath from Ubuntu to verify.',
+                                   evidence={'cwd':str(cwd),'distribution':wsl_distribution})
+                events.emit(stage,'wsl_workdir_unavailable',issue_id=issue.issue_id)
+                return {'status':'UNAVAILABLE','issue_id':issue.issue_id,'detail':str(exc)}
             prefix=[executable]+(['--distribution',wsl_distribution] if wsl_distribution else [])+[
-                '--cd',str(Path(cwd).resolve()),'--exec']
+                '--cd',linux_cwd,'--exec']
             if requested[0]=='librelane':
                 argv=prefix+['bash','-lc',
                     'exec "$HOME/.local/share/picads-librelane/venv/bin/python" -m librelane "$@"',

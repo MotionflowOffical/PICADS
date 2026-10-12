@@ -198,6 +198,7 @@ def setup(*, probe_only=False, runner=None, environ=None, which=None, exists=Non
             return 5
     setup_cmd = ('mkdir -p "$HOME/.local/share/picads-librelane" && '
                  'python3 -m venv "$HOME/.local/share/picads-librelane/venv" && '
+                 'PIP_CACHE_DIR="$HOME/.cache/picads-librelane-pip" '
                  '"$HOME/.local/share/picads-librelane/venv/bin/python" -m pip install --upgrade pip librelane')
     if not worked(wsl_command(distro, setup_cmd, timeout=2400, runner=runner)):
         print('Python venv/LibreLane installation failed; inspect pip output above.')

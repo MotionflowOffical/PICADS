@@ -381,6 +381,21 @@ class BuildSession:
 
     def _run_native_flow(self,rtl):
         # Optional external dependencies are actual required steps in build mode, not silent fallbacks.
+        if self.mode == 'physical':
+            physical_options = self.project.config.get('physical') or {}
+            if not isinstance(physical_options, dict) or not physical_options.get('enabled'):
+                issue = self.issues.add('PHYSICAL.DISABLED', 'ERROR', 'CONFIG', 'physical',
+                    'The project has physical.enabled: false or no physical configuration. '
+                    'No physical layout can be generated.',
+                    remedy='Use Physical Layout > Configure SKY130 / WSL, or set physical.enabled: true and a supported PDK in chip.yaml.')
+                self._done('physical', 'BLOCKED', issue_id=issue.issue_id)
+                return
+            if not physical_options.get('pdk'):
+                issue = self.issues.add('PHYSICAL.PDK_REQUIRED','ERROR','CONFIG','physical',
+                    'Physical design requires an explicit PDK name.',
+                    remedy='Configure physical.pdk: sky130A for the tested reference process.')
+                self._done('physical', 'BLOCKED', issue_id=issue.issue_id)
+                return
         backend=(self.project.config.get('tools') or {}).get('execution','native')
         wsl_dist=(self.project.config.get('tools') or {}).get('wsl_distribution')
         opts={'runner':backend,'wsl_distribution':wsl_dist} if backend=='wsl' else {}
@@ -486,7 +501,25 @@ class BuildSession:
         evidence=inspect_librelane(self.out/'runs'/tag,expected_top=name)
         atomic_write(self.out/'physical_evidence.json',json.dumps(evidence.as_dict(),indent=2))
         self.result.files['physical_evidence']=str(self.out/'physical_evidence.json')
-        if evidence.gds:self.result.files['gds']=evidence.gds[0]
+        if evidence.gds:
+            # Do not duplicate potentially large GDS files just to make them
+            # discoverable in the GUI. A small manifest links to the *actual*
+            # LibreLane run artifact and records the real numeric GDS layers.
+            from .maskinspect import inspect_gds
+            selected = Path(evidence.gds[0])
+            self.result.files['gds'] = str(selected)
+            gds_info = inspect_gds(selected)
+            manifest_path = self.out/'layout_artifacts.json'
+            manifest = {
+                'schema': 1, 'status': 'LAYOUT_GENERATED_NOT_MASK_SIGNOFF',
+                'gds': str(selected),
+                'gds_relative_to_build': str(selected.relative_to(self.out)),
+                'run_tag': tag, 'top': name,
+                'layers': gds_info.layer_elements,
+                'meaning': 'Numeric GDSII layers are layout data. Real photomask preparation requires the target PDK layer map, foundry-specific mask operations and independent verification.',
+                'duplicated_large_files': False}
+            atomic_write(manifest_path,json.dumps(manifest,indent=2))
+            self.result.files['layout_layers'] = str(manifest_path)
         self.events.emit('physical','inspect_artifacts',**evidence.as_dict())
         if evidence.status=='FAIL':
             i=self.issues.add('PHYSICAL.ARTIFACT_INVALID','ERROR','PHYSICAL','physical',

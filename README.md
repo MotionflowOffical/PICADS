@@ -1,3 +1,9 @@
+## v0.16.8r4 — reversible dependency storage + SKY130 physical flow
+
+The new **Storage / Uninstall / Cleanup** manager finds PICADS-owned portable installs, scoped WSL LibreLane caches, historical build outputs, and safe leftovers. Removal requires explicit selection and confirmation; the original installer can reinstall supported tools. **Docker data, WSL distributions and PDKs are not deleted.**
+
+For a real PICADS circuit-to-layout test, run `RUN_SKY130_REFERENCE.bat` (copies the bundled reference design; never edits your existing projects). The physical tab now has **Configure SKY130 / WSL** and **Latest GDS / Mask Layers** actions. Windows builds use WSL `wslpath` to locate the actual build directory. Full details: [`docs/PORTABLE_STORAGE_AND_PHYSICAL_FLOW_v0.16.8r4.md`](docs/PORTABLE_STORAGE_AND_PHYSICAL_FLOW_v0.16.8r4.md).
+
 ## v0.16.8r3 — WSL LibreLane backend recognition
 
 The **WSL LibreLane detection and physical-preflight fix** is documented in

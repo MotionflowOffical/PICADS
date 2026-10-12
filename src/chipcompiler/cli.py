@@ -31,9 +31,13 @@ def main(argv=None)->int:
     ap=argparse.ArgumentParser(prog='picads',description='PICADS procedural integrated circuit design and automation')
     ap.add_argument('--version',action='version',version=__version__)
     commands=ap.add_subparsers(dest='command',required=True)
-    for c in ('compile','build','physical','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight'):
+    for c in ('compile','build','physical','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight','configure-physical'):
         sp=commands.add_parser(c)
         if c not in ('doctor',):sp.add_argument('project',nargs='?',default='.')
+        if c=='configure-physical':
+            sp.add_argument('--wsl-distribution', default='Ubuntu')
+            sp.add_argument('--pdk', default='sky130A')
+            sp.add_argument('--clock-period-ns', type=float, default=20)
         if c=='restore':sp.add_argument('archive');sp.add_argument('--confirm',action='store_true')
         if c=='backup':sp.add_argument('--label',default='manual')
         if c=='simulate':sp.add_argument('--inputs',required=True,help='JSON input values, e.g. {"a":3,"b":2,"d":1}')
@@ -48,10 +52,12 @@ def main(argv=None)->int:
             sp.add_argument('--top',help='Specify GDS top cell, required if ambiguous')
             sp.add_argument('--max-shapes',type=int,default=20000)
     dep=commands.add_parser('dependencies',help='List/register/clear external EDA applications and installation folders')
-    dep.add_argument('operation',choices=('list','wsl-status','set','clear','auto','catalog','install','repair'),nargs='?',default='list')
+    dep.add_argument('operation',choices=('list','wsl-status','set','clear','auto','catalog','install','repair','storage','cleanup','uninstall'),nargs='?',default='list')
     dep.add_argument('tool',nargs='?')
     dep.add_argument('path',nargs='?')
     dep.add_argument('--folder',action='store_true',help='Register installation directory instead of executable')
+    dep.add_argument('--project-root', help='Optional PICADS project whose regenerable build outputs may be listed')
+    dep.add_argument('--apply', action='store_true', help='Explicitly approve deletion of listed managed dependency files')
     pdk=commands.add_parser('pdk',help='Read-only PDK inventory and selected technology folder')
     pdk.add_argument('operation',choices=('status','inspect','set','clear'),nargs='?',default='status')
     pdk.add_argument('path',nargs='?')
@@ -77,6 +83,25 @@ def main(argv=None)->int:
             elif ns.operation=='catalog':
                 from .windows_installer import install_catalog, dependency_root
                 result={'install_root':str(dependency_root()),'packages':install_catalog()}
+            elif ns.operation=='storage':
+                from .dependency_storage import storage_inventory
+                result=storage_inventory(project=Path(ns.project_root) if ns.project_root else None)
+            elif ns.operation in ('cleanup','uninstall'):
+                from .dependency_storage import storage_inventory, apply_storage_cleanup, StorageSafetyError
+                if not ns.tool:
+                    raise ValueError('Usage: picads dependencies '+ns.operation+' ID[,ID...] [--apply]; see dependencies storage')
+                selected=ns.tool.split(',')
+                if ns.operation=='uninstall':
+                    selected=['package:'+name if ':' not in name else name for name in selected]
+                if not ns.apply:
+                    inventory=storage_inventory(project=Path(ns.project_root) if ns.project_root else None)
+                    approved={row['id']:row for row in inventory['entries']}
+                    if any(key not in approved for key in selected):
+                        raise StorageSafetyError('Unknown or non-managed selection. Run dependencies storage for available IDs.')
+                    result={'status':'PREVIEW_ONLY','selection':[approved[key] for key in selected],
+                            'message':'Nothing was deleted. Repeat with --apply after reviewing every path.'}
+                else:
+                    result=apply_storage_cleanup(selected, confirmed=True, project=Path(ns.project_root) if ns.project_root else None)
             elif ns.operation=='install':
                 if not ns.tool:raise ValueError('Usage: picads dependencies install oss-cad-suite|klayout|kicad|librelane')
                 from .windows_installer import install_selected
@@ -115,6 +140,10 @@ def main(argv=None)->int:
         elif ns.command=='gui':
             from .gui import launch
             return launch(Path(ns.project))
+        elif ns.command=='configure-physical':
+            from .physical_setup import configure_physical_project
+            result=configure_physical_project(Path(ns.project), distribution=ns.wsl_distribution,
+                                              pdk=ns.pdk, period_ns=ns.clock_period_ns)
         elif ns.command=='physical-preflight':
             from .physical_flow import physical_preflight
             compile_result=BuildSession(Path(ns.project),mode='compile')

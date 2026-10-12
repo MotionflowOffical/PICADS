@@ -16,6 +16,7 @@ from .maskrender import render_gds_svg
 from .dependencies import TOOLS, tool_status, register_tool, unregister_tool, settings_file, resolve_tool, dependency_environment, auto_detect_all
 from .pdk import pdk_status, register_pdk, clear_pdk
 from .windows_installer import install_selected, install_catalog, dependency_root
+from .dependency_storage import storage_inventory, apply_storage_cleanup, readable_bytes
 
 try:
     from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl
@@ -175,6 +176,141 @@ class WindowsInstallWorker(QThread):
         except BaseException as exc:
             result = {'status':'FAILED', 'error':f'{type(exc).__name__}: {exc}'}
         self.completed.emit(result)
+
+
+class DependencyStorageWorker(QThread):
+    completed = Signal(object)
+    def __init__(self, mode='scan', selected=None, project=None):
+        super().__init__()
+        self.mode, self.selected, self.project = mode, selected or [], project
+    def run(self):
+        try:
+            result = (storage_inventory(project=self.project) if self.mode == 'scan' else
+                      apply_storage_cleanup(self.selected, confirmed=True, project=self.project))
+        except Exception as exc:
+            result = {'status':'FAILED','error':str(exc)}
+        self.completed.emit(result)
+
+
+class DependencyStorageDialog(QDialog):
+    """Explicit selection, size preview, and confirm-before-delete storage manager."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('PICADS — Dependency Storage and Cleanup')
+        self.resize(830, 680)
+        self.running = False
+        self.worker = None
+        self.options = {}
+        self.project = getattr(parent, 'root', None)
+        layout = QVBoxLayout(self)
+        heading = QLabel('Installed dependencies and recoverable storage')
+        heading.setObjectName('section'); layout.addWidget(heading)
+        warning = QLabel('PICADS deletes only selected managed portable installs, its own caches, '
+                         'and its own LibreLane WSL Python virtual environment. Docker, Ubuntu, '
+                         'PDKs, and project source files are preserved. Selected generated project build outputs may be removed. '
+                         'Installing removed dependencies again uses the normal installer.')
+        warning.setWordWrap(True); layout.addWidget(warning)
+        self.summary = QLabel('Scanning installed dependencies...')
+        self.summary.setWordWrap(True); layout.addWidget(self.summary)
+        scroll = QScrollArea(); scroll.setWidgetResizable(True)
+        widget = QWidget(); self.choices_layout = QVBoxLayout(widget)
+        scroll.setWidget(widget); layout.addWidget(scroll, 3)
+        self.log = QPlainTextEdit(); self.log.setReadOnly(True)
+        self.log.setMinimumHeight(95); layout.addWidget(self.log, 1)
+        bar = QHBoxLayout()
+        self.refresh_button = QPushButton('Rescan storage')
+        self.refresh_button.clicked.connect(self.scan); bar.addWidget(self.refresh_button)
+        self.remove_button = QPushButton('Remove Selected...')
+        self.remove_button.clicked.connect(self.remove_selected); bar.addWidget(self.remove_button)
+        close = QPushButton('Close'); close.clicked.connect(self.reject); bar.addWidget(close)
+        layout.addLayout(bar)
+        self.scan()
+
+    def _busy(self, value):
+        self.running = value
+        self.refresh_button.setEnabled(not value)
+        self.remove_button.setEnabled(not value)
+        for box in self.options.values(): box.setEnabled(not value)
+
+    def scan(self):
+        if self.running: return
+        self._busy(True)
+        self.summary.setText('Calculating local storage and checking WSL virtual environment...')
+        self.worker = DependencyStorageWorker('scan', project=self.project)
+        self.worker.completed.connect(self.scanned)
+        self.worker.start()
+
+    def scanned(self, result):
+        self._busy(False)
+        if result.get('status') == 'FAILED':
+            self.summary.setText('Scan failed: ' + result.get('error', '?'))
+            return
+        while self.choices_layout.count():
+            item = self.choices_layout.takeAt(0)
+            if item.widget(): item.widget().deleteLater()
+        self.options = {}
+        self.inventory = result
+        entries = result['entries']
+        self.summary.setText('PICADS-managed candidates: '+str(len(entries))+
+            ' · estimated size: '+readable_bytes(result['estimated_bytes'])+
+            ' (unknown WSL sizes are not included). These are opt-in selections.')
+        for entry in entries:
+            checkbox = QCheckBox(entry['name']+' — '+entry['size']+'  ['+entry['category']+']')
+            checkbox.setChecked(False)
+            self.options[entry['id']] = checkbox
+            self.choices_layout.addWidget(checkbox)
+            label = QLabel('  '+entry['path']+'\n  '+entry['detail'])
+            label.setWordWrap(True)
+            label.setStyleSheet('color:#a9bcc7')
+            self.choices_layout.addWidget(label)
+        self.choices_layout.addStretch(1)
+        if not entries: self.log.appendPlainText('Nothing safely managed or eligible for cleanup was found.')
+
+    def remove_selected(self):
+        selected = [key for key,box in self.options.items() if box.isChecked()]
+        if not selected:
+            QMessageBox.information(self, 'No selection', 'Select one or more storage items first.')
+            return
+        # Show actual item names and paths, not only a generic yes/no prompt.
+        current = {e['id']:e for e in self.inventory['entries']}
+        if any(key not in current for key in selected):
+            QMessageBox.warning(self, 'Storage changed', 'Selection changed; rescan before removing anything.')
+            self.scan(); return
+        text = '\n\n'.join(current[key]['name']+' ('+current[key]['size']+')\n'+current[key]['path']
+                           for key in selected)
+        choice = QMessageBox.warning(self,'Confirm permanent cleanup',
+            'Delete ONLY these selected PICADS-managed items?\n\n'+text+
+            '\n\nThis is permanent. Removed packages can be installed again, but downloads may be required. '
+            'No Docker images, Ubuntu distributions, PDKs, or project source files will be deleted.',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if choice != QMessageBox.StandardButton.Yes: return
+        self._busy(True)
+        self.worker = DependencyStorageWorker('remove', selected, project=self.project)
+        self.worker.completed.connect(self.removed)
+        self.worker.start()
+
+    def removed(self, result):
+        self.log.appendPlainText(json.dumps(result, indent=2))
+        self._busy(False)
+        if result.get('status') not in ('PASS',):
+            QMessageBox.warning(self, 'Cleanup incomplete', 'Some entries were not removed. See the log.')
+        else:
+            QMessageBox.information(self,'Storage cleanup',
+                'Selected items removed. Recovered space may differ from estimated file sizes.')
+        self.scan()
+        parent = self.parent()
+        if parent and hasattr(parent, 'refresh_dependencies'):
+            parent.refresh_dependencies()
+
+    def reject(self):
+        if self.running:
+            QMessageBox.information(self,'Operation running','Wait for the scan or cleanup to finish.')
+            return
+        super().reject()
+    def closeEvent(self,event):
+        if self.running: event.ignore()
+        else: super().closeEvent(event)
 
 
 class WindowsInstallerDialog(QDialog):
@@ -747,16 +883,56 @@ class Window(QMainWindow):
         w=QWidget();v=QVBoxLayout(w)
         title=QLabel('Physical Layout / Mask Data');title.setObjectName('section');v.addWidget(title)
         v.addWidget(QLabel('Real masks are only available after a successful physical EDA run with a valid PDK. No synthetic mask is displayed.'))
-        buttons=QHBoxLayout()
-        for text,fn in [('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),('Open GDS/OASIS in KLayout',self.open_mask),('Check Physical Prerequisites',self.preflight_physical),('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree)]:
-            b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
-        v.addLayout(buttons)
+        controls=[('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),
+                  ('Latest GDS / Mask Layers',self.latest_layout),('Open GDS/OASIS in KLayout',self.open_mask),
+                  ('Configure SKY130 / WSL',self.configure_physical),('Check Physical Prerequisites',self.preflight_physical),
+                  ('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree)]
+        for offset in (0,4):
+            buttons=QHBoxLayout()
+            for text,fn in controls[offset:offset+4]:
+                b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
+            v.addLayout(buttons)
         self.physical_message=QPlainTextEdit();self.physical_message.setReadOnly(True)
         self.physical_message.setPlainText('Physical design prerequisites:\n1. Compile & verify DLS\n2. Install Yosys + LibreLane (WSL2 or supported Linux)\n3. Configure licensed or open PDK and standard cells\n4. Run synthesis, placement, routing and physical verification\n5. Inspect actual GDSII/OASIS in KLayout, or render a read-only GDS geometry preview\n\nA gate-level DLS file alone is not a manufacturing mask.')
         v.addWidget(self.physical_message)
         self.physical_layout=v
         self.mask_svg_widget=None
         return w
+    def configure_physical(self):
+        """Explicitly configure project YAML, with backup and editor protections."""
+        from .physical_setup import configure_physical_project
+        from .wsl_backend import backend_status
+        yaml_path=self.root/'chip.yaml'
+        for i in range(self.editors.count()):
+            editor=self.editors.widget(i)
+            if isinstance(editor,CodeEditor) and editor.path==yaml_path and editor.document().isModified():
+                QMessageBox.warning(self,'Unsaved chip.yaml','Save or close the modified chip.yaml editor first. No configuration was changed.')
+                return
+        distro=backend_status().get('distribution') or 'Ubuntu'
+        value,ok=QInputDialog.getText(self,'WSL distribution',
+                                      'WSL distribution containing the verified LibreLane environment:',text=distro)
+        if not ok or not value.strip():return
+        choice=QMessageBox.question(self,'Configure real SKY130 layout',
+            'Enable PICADS physical design for this project with the sky130A PDK, '
+            'a 20 ns nominal clock and the WSL distribution '+repr(value.strip())+'?\n\n'
+            'This updates chip.yaml and preserves its original content in '
+            '.chipcompiler/physical_config_backups. It does NOT run the physical flow '
+            'or certify the layout for fabrication.',
+            QMessageBox.StandardButton.Yes|QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if choice!=QMessageBox.StandardButton.Yes:return
+        try:
+            report=configure_physical_project(self.root,distribution=value.strip())
+            for i in range(self.editors.count()):
+                editor=self.editors.widget(i)
+                if isinstance(editor,CodeEditor) and editor.path==yaml_path:
+                    editor.setPlainText(yaml_path.read_text(encoding='utf-8'))
+                    editor.document().setModified(False)
+            self.physical_message.setPlainText(json.dumps(report,indent=2))
+            self.tabs.setCurrentIndex(3)
+        except Exception as exc:
+            QMessageBox.critical(self,'Physical configuration failed',str(exc))
+
     def preflight_physical(self):
         """Run a real logical compile and report target readiness without layout."""
         from .physical_flow import physical_preflight
@@ -778,6 +954,32 @@ class Window(QMainWindow):
             self.tabs.setCurrentIndex(3)
         except Exception as exc:
             QMessageBox.critical(self,'Physical preflight failed',f'{type(exc).__name__}: {exc}')
+
+    def latest_layout(self):
+        """Open the actual, current GDS without asking users to find nested run files."""
+        manifest_file=self.root/'build'/'latest'/'layout_artifacts.json'
+        if not manifest_file.is_file():
+            QMessageBox.information(self,'No generated layout',
+                'No completed PICADS physical layout is recorded yet. Run physical preflight and the LibreLane flow first. ' 
+                "A successful LibreLane installation smoke test does not generate this project's GDS.")
+            return
+        try:
+            manifest=json.loads(manifest_file.read_text(encoding='utf-8'))
+            relative=Path(manifest['gds_relative_to_build'])
+            build=self.root/'build'/'latest'
+            gds=(build/relative).resolve()
+            if (not gds.is_relative_to(build.resolve()) or not gds.is_file()):
+                raise ValueError('The GDS location from the latest build is invalid or missing')
+            report=render_gds_svg(gds,build/'mask_previews'/(gds.stem+'.svg'),top=manifest['top'])
+            self.physical_message.setPlainText(json.dumps({'layout':manifest,'preview':report.as_dict()},indent=2))
+            if self.mask_svg_widget is None:
+                from PySide6.QtSvgWidgets import QSvgWidget
+                self.mask_svg_widget=QSvgWidget()
+                self.physical_layout.addWidget(self.mask_svg_widget,4)
+            self.mask_svg_widget.load(report.svg)
+            self.tabs.setCurrentIndex(3)
+        except Exception as exc:
+            QMessageBox.warning(self,'Could not preview latest layout',str(exc))
 
     def render_mask(self):
         file,_=QFileDialog.getOpenFileName(self,'Render actual GDSII geometry',str(self.root/'build'),'GDSII (*.gds *.gdsii)')
@@ -837,6 +1039,13 @@ class Window(QMainWindow):
     def open_artifact(self,item,col):
         path=Path(item.data(0,Qt.ItemDataRole.UserRole) or '')
         if path.is_file() and path.suffix in ('.v','.dls','.json','.log','.txt'):self.open_editor(path)
+        elif path.is_file() and path.suffix in ('.gds','.gdsii'):
+            viewer=resolve_tool('klayout')
+            if viewer:
+                try:subprocess.Popen([viewer,str(path)],env=dependency_environment(tool='klayout'))
+                except OSError as exc:QMessageBox.warning(self,'KLayout launch failed',str(exc))
+            else:
+                QMessageBox.information(self,'KLayout unavailable','Register the optional KLayout viewer in External Dependencies, or use Latest GDS / Mask Layers for an SVG preview.')
 
     def _settings_page(self):
         w=QWidget();v=QVBoxLayout(w)
@@ -886,6 +1095,9 @@ class Window(QMainWindow):
         download=QPushButton('Install / Manage Windows Tools...')
         download.clicked.connect(self.open_windows_installer)
         installrow.addWidget(download)
+        storage=QPushButton('Storage / Uninstall / Cleanup...')
+        storage.clicked.connect(self.open_dependency_storage)
+        installrow.addWidget(storage)
         origin=QLabel('Native Windows packages only · Opt-in downloads · Local dependencies/ folder')
         origin.setWordWrap(True);installrow.addWidget(origin,1)
         v.addLayout(installrow)
@@ -913,6 +1125,11 @@ class Window(QMainWindow):
         return w
     def open_windows_installer(self):
         dialog = WindowsInstallerDialog(self)
+        dialog.exec()
+        self.refresh_dependencies()
+
+    def open_dependency_storage(self):
+        dialog = DependencyStorageDialog(self)
         dialog.exec()
         self.refresh_dependencies()
 
