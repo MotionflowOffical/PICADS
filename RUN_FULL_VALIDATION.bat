@@ -3,7 +3,7 @@ setlocal
 cd /d "%~dp0"
 set "PYTHONPATH=%~dp0src"
 echo ============================================================
-echo PICADS v0.16.5 - Full automatic verification
+echo PICADS v0.16.6 - Full automatic verification
  echo This installs Python dependencies if missing, then runs
  echo compiler tests, GUI smoke, generated hardware simulations,
  echo and actual installed EDA tools. It does NOT install EDA/PDKs.
@@ -21,10 +21,10 @@ if not errorlevel 1 (
     )
     set "PYCMD=python"
 )
-%PYCMD% -m chipcompiler.system_validation --install-python-deps --output validation\PICADS_v0.16.5_diagnostics %*
+%PYCMD% -m chipcompiler.system_validation --install-python-deps --output validation\PICADS_v0.16.6_diagnostics %*
 set "RET=%ERRORLEVEL%"
 echo.
-echo Diagnostic ZIP: validation\PICADS_v0.16.5_diagnostics.zip
+echo Diagnostic ZIP: validation\PICADS_v0.16.6_diagnostics.zip
 echo RETURN CODE: %RET%  ^(0=all requested stages passed, 2=partial/unavailable, 1=failure^)
 echo Please send the ZIP back for analysis.
 pause

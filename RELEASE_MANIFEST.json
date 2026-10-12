@@ -1,21 +1,18 @@
 {
   "product": "PICADS",
-  "version": "0.16.5",
-  "type": "cumulative source; Windows v1 feature verification patch",
+  "version": "0.16.6",
+  "type": "cumulative source; WSL LibreLane existing-distro installer fix",
   "changes": [
-    "Default automated test runner uses 18-case v1 functional feature matrix, not iteration history",
-    "GUI robot emulates user text edits; updated missing/error/recovery checks",
-    "Correct dependency registration assertion and isolated offline repair test",
-    "Generate JUnit cases, capability matrix and one hash-verified diagnostic ZIP",
-    "Preserve native Icarus/Yosys and conditional PDK-backed LibreLane acceptance"
+    "Detect installed WSL distros using Unicode-safe Python subprocess reads, not findstr on WSL UTF-16 output",
+    "Reuse installed Ubuntu-24.04, Ubuntu, Debian or other runnable user WSL distributions",
+    "Never attempt duplicate Ubuntu installation when an existing Linux distro is present but not initialized",
+    "Use discovered distribution consistently during Docker integration and LibreLane smoke test",
+    "Stage helper into dependencies/librelane at explicit installation time and preserve all existing installed EDA files"
   ],
   "verification": {
-    "focused_pytest": "44 passed, 3 skipped (local Qt unavailable)",
-    "v1_feature_matrix": "18 passed, 0 failed",
-    "real_windows_gui_tests": "NOT RE-EXECUTED IN THIS ENVIRONMENT; user rerun required",
-    "full_historical_suite": "INCOMPLETE: all-in-one run timed out around 51%; default suite deliberately excludes it",
-    "native_external_eda": "NOT AVAILABLE IN LOCAL ENVIRONMENT; Windows evidence required",
-    "manufacturing_signoff": "NOT IMPLEMENTED"
+    "focused_pytest": "109 passed, 1 skipped (PySide6 unavailable)",
+    "actual_windows_wsl_installation": "NOT RUN; requires user Windows verification",
+    "physical_signoff": "NOT VERIFIED"
   },
   "external_binaries_included": false
 }

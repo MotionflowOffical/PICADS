@@ -1,3 +1,5 @@
+> **v0.16.6 Windows hotfix:** LibreLane setup now detects and reuses existing WSL distributions, including `Ubuntu-24.04`, instead of incorrectly running `wsl --install -d Ubuntu`. See [WSL setup fix](docs/WSL_DISCOVERY_HOTFIX_v0.16.6.md). Existing `dependencies/` files and installed WSL distributions are not changed by the patch.
+
 # PICADS v0.16.5
 
 **Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
