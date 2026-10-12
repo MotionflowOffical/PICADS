@@ -1,6 +1,24 @@
-# PICADS v0.16.2
+# PICADS v0.16.4
 
 **Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
+
+## v0.16.4 — Windows DLL loading and audit fix
+
+**Fix for user-reported pop-up DLL errors:** The v0.16.3 Windows audit showed that Yosys could not find a runtime DLL (`0xC0000135`), while Z3 picked up an incompatible runtime DLL (`0xC0000139`). Additionally, PICADS incorrectly invoked the OSS CAD Suite's `environment.bat` from a folder containing a space. The child-process environment manager is now tool-specific, avoids PATH pollution between KiCad/KLayout/OSS CAD Suite/MSYS2, and activates OSS CAD Suite through an unambiguous temporary Windows `.cmd` launcher. The Windows audit now reports loader errors by category and suppresses interactive Windows loader dialogs where possible.
+
+**Offline fix:** Apply the small v0.16.4 patch over v0.16.3 without touching `dependencies/`. Run `RUN_WINDOWS_TOOL_AUDIT.bat` and upload `validation/PICADS_v0.16.4_tools_diagnostics.zip`. No large downloads or reinstallations should be necessary unless the corrected audit confirms an independent native runtime failure. See [Windows DLL recovery guide](docs/WINDOWS_DLL_RECOVERY_v0.16.4.md).
+
+## v0.16.3 — Windows missing-dependency fixes
+
+**KiCad PCBnew registration:** Offline repair now discovers `pcbnew.exe` alongside `kicad.exe` and `kicad-cli.exe`. The updated installer avoids re-downloading KiCad when all three tools are present.
+
+**Verilator:** PICADS now creates a native Windows `.cmd` launcher when the existing OSS CAD Suite includes the supported `verilator_bin.exe` and runtime files. If a working C/C++ toolchain or bundled launcher is absent, select the new **MSYS2 UCRT64 — GCC, G++ and Verilator** package in Settings. WinGet and MSYS2 pacman install native Windows binaries; MSYS2 may use `C:\msys64` when the PICADS folder name contains spaces.
+
+**Physical EDA tools:** OpenROAD, Magic, and Netgen remain available through the **optional LibreLane WSL2/Docker backend** rather than being falsely marked as native Windows programs. GUI Settings now explains this distinction.
+
+**Easy recovery:** Run `REPAIR_WINDOWS_TOOL_REGISTRATIONS.bat` to reuse existing KiCad and OSS CAD Suite files without downloading anything. Run `RUN_WINDOWS_TOOL_AUDIT.bat` to generate a single `validation/PICADS_v0.16.3_tools_diagnostics.zip` containing tool discovery and startup results. No test hardware or source projects are modified.
+
+[Windows missing-tools recovery guide](docs/WINDOWS_TOOL_AVAILABILITY_v0.16.3.md).
 
 ## v0.16.2 — OSS CAD Suite Windows registration hotfix
 
@@ -34,7 +52,7 @@ The cumulative previous release added validated PDK/technology and floorplan pre
 
 The release includes an independently specified **4-bit ALU slice** in [`examples/alu_slice_component`](examples/alu_slice_component/circuit.py) (one piece of a future processor, not a complete chip), with its MCD/CO declarations and no handmade RTL or masks. The compiler's DLS passes a separate 1,024-case truth-table check; errors are injected deliberately to test diagnostics.
 
-**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.2_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
+**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.3_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
 
 For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART.md). See [automated acceptance guide](docs/AUTOMATED_V1_VERIFICATION_v0.15.1.md) and [ALU chip-part specification](docs/ALU_SLICE_REFERENCE_v0.15.1.md).
 
@@ -46,7 +64,7 @@ For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART
 2. Run `SETUP_GUI_WINDOWS.bat` to install Python GUI dependencies if necessary.
 3. Run `RUN_GUI.bat` and use **Settings → External Dependencies → Choose App / Choose Folder** to register Icarus (`iverilog` + `vvp`), Yosys, LibreLane, KLayout and other tools you have.
 4. For the first complete hardware-to-GDS test, run **`RUN_V1_ACCEPTANCE.bat`**. It compiles a bundled synchronous example and attempts real RTL/synthesis/physical checks where the required tools and PDK are available.
-5. Return `validation/PICADS_v0.16.2_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
+5. Return `validation/PICADS_v0.16.3_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
 
 To select a target other than the default `sky130A`, run:
 
@@ -63,7 +81,7 @@ python -m pip install -e ".[test,gui]"
 picads doctor
 picads compile examples/first_physical_chip
 picads physical-preflight examples/first_physical_chip
-python -m chipcompiler.acceptance --output validation/PICADS_v0.16.2_v1_acceptance
+python -m chipcompiler.acceptance --output validation/PICADS_v0.16.3_v1_acceptance
 python -m pytest -q tests/test_iteration14.py
 ```
 

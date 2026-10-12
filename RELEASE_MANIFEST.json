@@ -1,19 +1,31 @@
 {
   "product": "PICADS",
-  "version": "0.16.2",
+  "version": "0.16.4",
   "format": "flat cumulative source ZIP",
   "changes": [
-    "Fixed OSS CAD Suite Windows install failure on optional extensionless Verilator script",
-    "Windows registration now selects executable launchers only; optional script entry points safely skipped",
-    "Offline recovery of previously extracted managed bundles without downloading another 544 MiB archive",
-    "Added one-click REPAIR_OSS_CAD_WINDOWS.bat and CLI dependencies repair",
-    "Existing KiCad and user projects retained; unknown installations never overwritten"
+    "Fix Windows OSS CAD Suite environment.bat invocation in paths containing spaces via temporary CMD script",
+    "Scope runtime DLL PATH per native tool; prevent KiCad/KLayout/MSYS2 contamination of Yosys and Z3",
+    "Use scoped environment for build, validation, GDS viewer and dependency audit",
+    "Suppress interactive Windows loader dialogs during headless audit when supported",
+    "Classify loader errors 0xC0000135, 0xC0000139, 0xC0000142, 0xC000007B",
+    "Keep existing installed tools; one-command Windows audit with ZIP"
   ],
   "verification": {
-    "targeted_python": "90 passed, 1 skipped",
-    "windows_real_execution": "NOT RUN in Linux test environment",
-    "full_regression": "PENDING; do not infer from targeted tests",
-    "manufacturing_signoff": "NOT IMPLEMENTED"
+    "targeted_Dll_environment": "7 targeted tests plus legacy installer/dependency tests passed",
+    "file_group_regression": {
+      "passed": 534,
+      "skipped": 3,
+      "failed_files": [],
+      "skipped_only_files": [
+        "test_gui_workflow.py"
+      ]
+    },
+    "online_windows_executable_startup": "NOT VERIFIED HERE; user Windows audit required",
+    "physical_signoff": "NOT VERIFIED",
+    "user_audit_baseline": {
+      "yosys": "0xC0000135 missing DLL",
+      "z3": "0xC0000139 DLL entry point not found"
+    }
   },
   "external_binaries_included": false
 }

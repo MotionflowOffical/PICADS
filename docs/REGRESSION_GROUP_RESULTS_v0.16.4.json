@@ -1,0 +1,146 @@
+[
+  {
+    "file": "test_diagnostic_bundle.py",
+    "returncode": 0,
+    "summary": "2 passed in 0.07s",
+    "output_tail": "..                                                                       [100%]\n2 passed in 0.07s\n"
+  },
+  {
+    "file": "test_gui_dependency_installer.py",
+    "returncode": 0,
+    "summary": "1 skipped in 0.05s",
+    "output_tail": "s                                                                        [100%]\n1 skipped in 0.05s\n"
+  },
+  {
+    "file": "test_gui_smoke.py",
+    "returncode": 0,
+    "summary": "1 skipped in 0.03s",
+    "output_tail": "s                                                                        [100%]\n1 skipped in 0.03s\n"
+  },
+  {
+    "file": "test_gui_workflow.py",
+    "returncode": 5,
+    "summary": "1 skipped in 0.01s",
+    "output_tail": "\n1 skipped in 0.01s\n"
+  },
+  {
+    "file": "test_iteration10.py",
+    "returncode": 0,
+    "summary": "16 passed in 4.16s",
+    "output_tail": "................                                                         [100%]\n16 passed in 4.16s\n"
+  },
+  {
+    "file": "test_iteration11.py",
+    "returncode": 0,
+    "summary": "24 passed in 7.30s",
+    "output_tail": "........................                                                 [100%]\n24 passed in 7.30s\n"
+  },
+  {
+    "file": "test_iteration12.py",
+    "returncode": 0,
+    "summary": "14 passed in 1.02s",
+    "output_tail": "..............                                                           [100%]\n14 passed in 1.02s\n"
+  },
+  {
+    "file": "test_iteration13.py",
+    "returncode": 0,
+    "summary": "27 passed in 1.80s",
+    "output_tail": "...........................                                              [100%]\n27 passed in 1.80s\n"
+  },
+  {
+    "file": "test_iteration14.py",
+    "returncode": 0,
+    "summary": "26 passed in 0.49s",
+    "output_tail": "..........................                                               [100%]\n26 passed in 0.49s\n"
+  },
+  {
+    "file": "test_iteration15.py",
+    "returncode": 0,
+    "summary": "7 passed in 0.84s",
+    "output_tail": ".......                                                                  [100%]\n7 passed in 0.84s\n"
+  },
+  {
+    "file": "test_iteration2.py",
+    "returncode": 0,
+    "summary": "33 passed in 1.12s",
+    "output_tail": ".................................                                        [100%]\n33 passed in 1.12s\n"
+  },
+  {
+    "file": "test_iteration3.py",
+    "returncode": 0,
+    "summary": "36 passed in 6.04s",
+    "output_tail": "....................................                                     [100%]\n36 passed in 6.04s\n"
+  },
+  {
+    "file": "test_iteration4.py",
+    "returncode": 0,
+    "summary": "22 passed in 1.15s",
+    "output_tail": "......................                                                   [100%]\n22 passed in 1.15s\n"
+  },
+  {
+    "file": "test_iteration5.py",
+    "returncode": 0,
+    "summary": "14 passed in 0.18s",
+    "output_tail": "..............                                                           [100%]\n14 passed in 0.18s\n"
+  },
+  {
+    "file": "test_iteration6.py",
+    "returncode": 0,
+    "summary": "32 passed in 0.44s",
+    "output_tail": "................................                                         [100%]\n32 passed in 0.44s\n"
+  },
+  {
+    "file": "test_iteration7.py",
+    "returncode": 0,
+    "summary": "33 passed in 3.79s",
+    "output_tail": ".................................                                        [100%]\n33 passed in 3.79s\n"
+  },
+  {
+    "file": "test_iteration8.py",
+    "returncode": 0,
+    "summary": "24 passed in 9.92s",
+    "output_tail": "........................                                                 [100%]\n24 passed in 9.92s\n"
+  },
+  {
+    "file": "test_iteration9.py",
+    "returncode": 0,
+    "summary": "40 passed in 8.26s",
+    "output_tail": "........................................                                 [100%]\n40 passed in 8.26s\n"
+  },
+  {
+    "file": "test_logic.py",
+    "returncode": 0,
+    "summary": "128 passed in 1.71s",
+    "output_tail": "........................................................................ [ 56%]\n........................................................                 [100%]\n128 passed in 1.71s\n"
+  },
+  {
+    "file": "test_pipeline.py",
+    "returncode": 0,
+    "summary": "10 passed in 0.43s",
+    "output_tail": "..........                                                               [100%]\n10 passed in 0.43s\n"
+  },
+  {
+    "file": "test_windows_dll_environment_0164.py",
+    "returncode": 0,
+    "summary": "7 passed in 0.07s",
+    "output_tail": ".......                                                                  [100%]\n7 passed in 0.07s\n"
+  },
+  {
+    "file": "test_windows_installer.py",
+    "returncode": 0,
+    "summary": "19 passed in 0.22s",
+    "output_tail": "...................                                                      [100%]\n19 passed in 0.22s\n"
+  },
+  {
+    "file": "test_windows_missing_tools_0163.py",
+    "returncode": 0,
+    "summary": "9 passed in 0.11s",
+    "output_tail": ".........                                                                [100%]\n9 passed in 0.11s\n"
+  },
+  {
+    "file": "test_windows_optional_install.py",
+    "returncode": 0,
+    "summary": "11 passed in 0.08s",
+    "output_tail": "...........                                                              [100%]\n11 passed in 0.08s\n"
+  }
+]

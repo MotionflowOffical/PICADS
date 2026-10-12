@@ -24,7 +24,7 @@ try:
         QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainTextEdit,QDockWidget,QLabel,QPushButton,QLineEdit,
         QGraphicsScene,QGraphicsView,QGraphicsRectItem,QGraphicsTextItem,QGraphicsLineItem,
         QMessageBox,QFileDialog,QComboBox,QToolBar,QInputDialog,QTableWidget,QTableWidgetItem,QHeaderView,
-        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar)
+        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar,QScrollArea)
 except ImportError as exc:
     raise ImportError('The GUI requires PySide6. Install with: pip install "chipcompiler[gui]"') from exc
 
@@ -182,7 +182,7 @@ class WindowsInstallerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle('PICADS — Install Windows Dependencies')
-        self.resize(680,560)
+        self.resize(780,680)
         self.worker = None
         self.running = False
         layout = QVBoxLayout(self)
@@ -192,13 +192,20 @@ class WindowsInstallerDialog(QDialog):
                              str(dependency_root())+' and registered automatically. '
                              'PICADS itself does not require any external EDA tools to compile or simulate DLS.')
         explanation.setWordWrap(True); layout.addWidget(explanation)
+        # Keep installer choices visible on smaller Windows laptop screens.
+        # Never let optional packages push the log or Install button off-screen.
+        package_scroll=QScrollArea()
+        package_scroll.setWidgetResizable(True)
+        package_scroll.setMinimumHeight(165)
+        package_container=QWidget()
+        package_layout=QVBoxLayout(package_container)
         self.choices = {}
         for spec in install_catalog():
             check = QCheckBox(spec['name'])
             check.setEnabled(spec['can_install'])
             check.setChecked(False)
             self.choices[spec['id']] = check
-            layout.addWidget(check)
+            package_layout.addWidget(check)
             if spec['installed'] and spec['id']=='librelane':
                 status = 'WSL smoke-test marker present; complete PICADS backend configuration'
             elif spec.get('can_repair') and spec['installed']:
@@ -213,17 +220,24 @@ class WindowsInstallerDialog(QDialog):
                 status = 'downloadable native Windows archive'
             elif spec['mode'] == 'winget':
                 status = 'selectable: native WinGet installer; preferred folder may not be honored'
+            elif spec['mode'] == 'winget-msys2':
+                status = 'selectable: native MSYS2 UCRT64 toolchain; may install outside PICADS if its path contains spaces'
             else:
                 status = 'selectable: opens guided WSL2/Docker setup console, may require reboot'
             purpose = QLabel('  '+spec['purpose']+' — '+status)
             purpose.setWordWrap(True);purpose.setStyleSheet('color:#a9bcc7')
-            layout.addWidget(purpose)
+            package_layout.addWidget(purpose)
             if spec['mode'] != 'portable':
                 guide = QPushButton('Open official setup information for '+spec['id'])
                 guide.clicked.connect(lambda checked=False, url=spec['source']:
                                       QDesktopServices.openUrl(QUrl(url)))
-                layout.addWidget(guide)
-        self.log = QPlainTextEdit();self.log.setReadOnly(True);layout.addWidget(self.log,1)
+                package_layout.addWidget(guide)
+        package_layout.addStretch(1)
+        package_scroll.setWidget(package_container)
+        layout.addWidget(package_scroll,2)
+        self.log = QPlainTextEdit();self.log.setReadOnly(True)
+        self.log.setMinimumHeight(140)
+        layout.addWidget(self.log,1)
         self.progress = QProgressBar();self.progress.setRange(0,1);self.progress.setValue(0)
         layout.addWidget(self.progress)
         bar = QHBoxLayout()
@@ -232,7 +246,7 @@ class WindowsInstallerDialog(QDialog):
         bar.addWidget(self.install_button)
         close = QPushButton('Close');close.clicked.connect(self.reject)
         bar.addWidget(close);layout.addLayout(bar)
-        self.log.appendPlainText('All four checkboxes are selectable. KiCad uses WinGet (may install outside dependencies/). LibreLane launches a guided WSL2/Docker setup; its success is not assumed. PICADS native compilation needs neither.')
+        self.log.appendPlainText('Native: OSS CAD Suite, KLayout, KiCad (including pcbnew), and MSYS2 GCC/G++/Verilator. LibreLane uses an optional WSL2/Docker backend containing OpenROAD/Magic/Netgen; these are not registered as Windows EXEs.')
     def begin_install(self):
         selected = [name for name,box in self.choices.items() if box.isChecked()]
         if not selected:
@@ -802,7 +816,7 @@ class Window(QMainWindow):
         path=resolve_tool('klayout')
         if not path:
             QMessageBox.warning(self,'Missing KLayout','KLayout was not found. Open Settings → External dependencies and choose its application or installation folder.');return
-        try:subprocess.Popen([path,file],env=dependency_environment())
+        try:subprocess.Popen([path,file],env=dependency_environment(tool='klayout'))
         except OSError as exc:QMessageBox.critical(self,'KLayout launch failed',str(exc))
 
     def _build_page(self):
@@ -919,6 +933,13 @@ class Window(QMainWindow):
                     text=f"AVAILABLE [{state['source']}] {state['path']}"
                 else:
                     text=f"UNAVAILABLE [{state['source']}] {state['error']}"
+                    if tool in ('openroad', 'magic', 'netgen') and state['source']=='unavailable':
+                        from .windows_installer import dependency_root
+                        marker=dependency_root()/'librelane'/'backend_smoke_passed.txt'
+                        if marker.is_file():
+                            text='BACKEND CONFIGURED — provided inside LibreLane/WSL2; no native Windows EXE registered'
+                        else:
+                            text='PHYSICAL BACKEND — install/verify LibreLane (WSL2/Docker); not a native Windows EXE'
                 item=QTableWidgetItem(text)
                 item.setToolTip((state.get('selection') or '')+'\n'+(state.get('error') or ''))
                 item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)

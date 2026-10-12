@@ -50,7 +50,7 @@ def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:
             log.flush()
             proc=subprocess.Popen(argv,cwd=cwd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
                                   text=True,encoding='utf-8',errors='replace',bufsize=1,
-                                  env=dependency_environment() if runner=='native' else None)
+                                  env=dependency_environment(tool=requested[0]) if runner=='native' and requested[0] in TOOLS else (dependency_environment() if runner=='native' else None))
             def consume(stream,label,tail):
                 try:
                     for line in stream:

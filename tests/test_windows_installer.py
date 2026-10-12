@@ -114,7 +114,9 @@ def test_windows_exe_activation_is_child_only(monkeypatch,tmp_path):
     monkeypatch.setattr(deps,'_portable_windows_environment',lambda _:{'PATH':'native;tool','PYTHONPATH':'nativepython'})
     monkeypatch.setenv('PICADS_SETTINGS_DIR',str(tmp_path/'config'))
     untouched=os.environ.get('PATH')
-    result=dependency_environment({'PATH':'ORIGINAL','PICADS_CUSTOM':'retained'})
+    monkeypatch.setattr(deps.sys,'platform','win32')
+    monkeypatch.setattr(deps,'resolve_tool',lambda _name:None)
+    result=dependency_environment({'PATH':'ORIGINAL','PICADS_CUSTOM':'retained'},tool='yosys')
     assert result['PICADS_CUSTOM']=='retained'
     assert 'native;tool' in result['PATH']
     assert os.environ.get('PATH')==untouched

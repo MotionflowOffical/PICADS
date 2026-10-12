@@ -41,7 +41,7 @@ PACKAGES = {
         'label': 'OSS CAD Suite — Yosys, Icarus, Verilator, formal tools',
         'purpose': 'Native Windows RTL synthesis, simulation and formal checks',
         'mode': 'portable',
-        'tools': ('yosys', 'iverilog', 'vvp', 'verilator', 'sby', 'z3'),
+        'tools': ('yosys', 'iverilog', 'vvp', 'verilator', 'sby', 'z3', 'gcc', 'g++'),
         'required': False,
         'source': 'https://github.com/YosysHQ/oss-cad-suite-build/releases',
     },
@@ -63,11 +63,19 @@ PACKAGES = {
     },
     'kicad': {
         'label': 'KiCad — optional PCB design companion',
-        'purpose': 'Install KiCad through WinGet; PCB editing only, not IC physical signoff',
+        'purpose': 'WinGet installation and offline repair; registers KiCad, pcbnew PCB editor and KiCad CLI',
         'mode': 'winget',
-        'tools': ('kicad', 'kicad-cli'),
+        'tools': ('kicad', 'kicad-cli', 'pcbnew'),
         'required': False,
         'source': 'https://www.kicad.org/download/windows/',
+    },
+    'msys2-toolchain': {
+        'label': 'MSYS2 UCRT64 — native GCC, G++ and Verilator',
+        'purpose': 'Official WinGet + MSYS2 pacman toolchain; no Linux runtime needed',
+        'mode': 'winget-msys2',
+        'tools': ('gcc', 'g++', 'verilator'),
+        'required': False,
+        'source': 'https://www.msys2.org/',
     },
 }
 
@@ -109,7 +117,10 @@ def install_catalog() -> list[dict]:
             except (OSError, ValueError, TypeError, KeyError):
                 managed = False
         if key == 'kicad':
-            managed = managed or bool((package_dir / 'picads_install_receipt.json').is_file() and states['kicad']['available'])
+            managed = managed or bool(receipt_path.is_file() and
+                                      all(states[t]['available'] for t in ('kicad','kicad-cli','pcbnew')))
+        if key == 'msys2-toolchain':
+            managed = bool(receipt_path.is_file() and all(s['available'] for s in states.values()))
         if key == 'librelane':
             managed = (package_dir / 'backend_smoke_passed.txt').is_file()
         # A valid managed receipt makes an installation safely re-registrable
@@ -118,7 +129,7 @@ def install_catalog() -> list[dict]:
                       receipt_path.is_file() and
                       isinstance(receipt, dict) and receipt.get('package') == key)
         can_install = ((spec['mode'] == 'portable' and (not package_dir.exists() or can_repair)) or
-                       spec['mode'] in ('winget', 'guided-wsl'))
+                       spec['mode'] in ('winget', 'guided-wsl', 'winget-msys2'))
         rows.append({'id': key, 'name': spec['label'], 'purpose': spec['purpose'],
                      'mode': spec['mode'], 'required': spec['required'],
                      'source': spec['source'],
@@ -350,6 +361,45 @@ def _find_binary(root: Path, name: str) -> Path | None:
     return None
 
 
+def _oss_verilator_wrapper(root: Path, progress: Callable[[str], None]) -> Path | None:
+    """Expose an existing OSS CAD Suite verilator_bin.exe via an actual CMD wrapper.
+
+    Upstream bundles can contain a Perl frontend named `verilator` and a
+    native engine named `verilator_bin.exe`. Neither alone is directly usable
+    as a PICADS-registered Windows `verilator` command. The launcher passes
+    through arguments while setting the upstream VERILATOR_ROOT and PATH.
+    It does NOT imply a C++ toolchain for building Verilator simulations.
+    """
+    roots = [root / 'oss-cad-suite']
+    roots.extend(root.glob('*/oss-cad-suite'))
+    for suite in roots:
+        bin_path = suite / 'bin' / 'verilator_bin.exe'
+        data_path = suite / 'share' / 'verilator'
+        if not bin_path.is_file() or not data_path.is_dir():
+            continue
+        # Use a relative path to avoid hardcoding installation drive names or
+        # spaces and to survive a user moving the PICADS directory.
+        wrapper = root / 'picads-launchers' / 'verilator.cmd'
+        wrapper.parent.mkdir(parents=True, exist_ok=True)
+        relative_bin = os.path.relpath(bin_path, wrapper.parent).replace('/', '\\')
+        relative_data = os.path.relpath(data_path, wrapper.parent).replace('/', '\\')
+        activation = suite / 'environment.bat'
+        activate_line = ''
+        if activation.is_file():
+            relative_activation = os.path.relpath(activation, wrapper.parent).replace('/', '\\')
+            activate_line = f'call "%~dp0{relative_activation}" >nul\r\n'
+        bat = ('@echo off\r\nsetlocal DisableDelayedExpansion\r\n'
+               + activate_line
+               + f'set "VERILATOR_ROOT=%~dp0{relative_data}"\r\n'
+               + f'"%~dp0{relative_bin}" %*\r\n'
+               + 'exit /b %ERRORLEVEL%\r\n')
+        wrapper.write_bytes(bat.encode('utf-8'))
+        progress('Created Windows Verilator launcher for bundled verilator_bin.exe '
+                 '(functional smoke test and a C++ toolchain are still required).')
+        return wrapper
+    return None
+
+
 def _required_tools(package: str) -> tuple[str, ...]:
     return ('yosys', 'iverilog', 'vvp') if package == 'oss-cad-suite' else ('klayout',)
 
@@ -377,6 +427,10 @@ def _register_managed(package: str, directory: Path, progress: Callable[[str], N
     """
     from .dependencies import DependencyConfigurationError
     found = _scan_native_tools(directory, package, progress)
+    if package == 'oss-cad-suite' and 'verilator' not in found:
+        wrapper = _oss_verilator_wrapper(directory, progress)
+        if wrapper is not None:
+            found['verilator'] = wrapper.relative_to(directory)
     receipt_path = directory / 'picads_install_receipt.json'
     try:
         receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
@@ -424,10 +478,14 @@ def install_package(package: str, *, progress: Callable[[str], None] | None = No
     progress = progress or (lambda msg: None)
     if package not in PACKAGES:
         raise PackageInstallError('Unknown package: '+package)
-    if package in ('kicad', 'librelane'):
-        from .windows_optional_install import install_kicad, stage_librelane
+    if package in ('kicad', 'librelane', 'msys2-toolchain'):
+        from .windows_optional_install import install_kicad, stage_librelane, install_msys2_toolchain
         root = dependency_root()
-        return install_kicad(root, progress) if package == 'kicad' else stage_librelane(root, progress)
+        if package == 'kicad':
+            return install_kicad(root, progress)
+        if package == 'librelane':
+            return stage_librelane(root, progress)
+        return install_msys2_toolchain(root, progress)
     if PACKAGES[package]['mode'] != 'portable':
         raise PackageInstallError(f'{package} has no approved portable package')
     root = dependency_root()

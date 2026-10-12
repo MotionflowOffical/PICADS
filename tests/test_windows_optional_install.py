@@ -27,6 +27,7 @@ def test_kicad_winget_uses_exact_official_id_and_registers(monkeypatch,tmp_path)
     cmds=[]
     def fake_run(argv,**kw):
         cmds.append(argv)
+        (fake_bin/'pcbnew.exe').write_bytes(b'exe')
         return SimpleNamespace(stdout='ok',stderr='',returncode=0)
     result=opt.install_kicad(tmp_path/'deps', lambda _:None,run=fake_run,which=lambda x:'C:/winget.exe')
     assert result['status']=='INSTALLED'

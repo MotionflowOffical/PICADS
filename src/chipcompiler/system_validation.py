@@ -15,7 +15,8 @@ ROOT=Path(__file__).resolve().parents[2]
 def _run(argv:list[str],cwd:Path,log:Path,timeout:int=180,env:dict|None=None)->dict:
     log.parent.mkdir(parents=True,exist_ok=True)
     argv=list(argv)
-    if argv and argv[0] in TOOLS:
+    requested_tool = argv[0] if argv and argv[0] in TOOLS else None
+    if requested_tool:
         binary=resolve_tool(argv[0])
         if binary is None:
             log.write_text(f'UNAVAILABLE: {argv[0]} not found in PICADS settings or on PATH\n',encoding='utf-8')
@@ -26,7 +27,7 @@ def _run(argv:list[str],cwd:Path,log:Path,timeout:int=180,env:dict|None=None)->d
             handle.write('COMMAND: '+repr(argv)+'\nWORKDIR: '+str(cwd)+'\n')
             handle.flush()
             result=subprocess.run(argv,cwd=cwd,stdout=handle,stderr=subprocess.STDOUT,
-                                  timeout=timeout,env=dependency_environment(env),check=False)
+                                  timeout=timeout,env=dependency_environment(env, tool=requested_tool),check=False)
             handle.write('\nEXIT_CODE: '+str(result.returncode)+'\n')
         return {'status':'PASS' if result.returncode==0 else 'FAIL','exit_code':result.returncode,
                 'log':log.name,'command':argv}
@@ -49,7 +50,7 @@ def run_validation(output:Path,install_python_deps=False,physical_project:Path|N
     env['PYTHONDONTWRITEBYTECODE']='1'
     summary={'run_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),
              'platform':platform.platform(),'python':sys.version.split()[0],
-             'project_version':'0.14.0','statuses':{},'warnings':[],
+             'project_version':'0.16.4','statuses':{},'warnings':[],
              'scope':'Development validation; NOT a fabrication or foundry signoff certificate.'}
     status=summary['statuses']
     def record(name,result):
