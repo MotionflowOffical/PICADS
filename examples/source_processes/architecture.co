@@ -1,0 +1,5 @@
+schedule:
+  mode: source_processes
+  latencies:
+    MUL: 2
+  ready_types: [MUL]

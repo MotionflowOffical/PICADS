@@ -11,7 +11,9 @@ explicit input, and operator latency is controller reservation latency.
 from __future__ import annotations
 import ast, hashlib, math, random
 from dataclasses import dataclass, asdict
-from .generator import LogicBuilder, parse_type
+from .generator import LogicBuilder
+from .shared_operators import SHARED_BINARY_OPS
+from .generator import parse_type
 from .ir import Bus, DLS
 from .diagnostics import IssueCollector, DiagnosticException
 
@@ -216,6 +218,17 @@ class TransactionalCompiler:
         if not isinstance(ready_types,list) or any(v not in valid_kinds or not isinstance(v,str) for v in ready_types):
             self.fail('CO.CFG_READY','ready_types must be a list of supported operation kinds.',f,'CO')
         self.latencies=latencies;self.ready_types=set(ready_types)
+        shared=sched.get('global_shared_types',[])
+        if not isinstance(shared,list) or len(set(map(str,shared)))!=len(shared) or any(k not in SHARED_BINARY_OPS for k in shared):
+            self.fail('CO.GLOBAL_SHARE_TYPES','global_shared_types must contain unique supported binary operator types.',f,'CO')
+        self.shared_types=set(shared)
+        self.shared_memory=sched.get('global_shared_memory',False)
+        if type(self.shared_memory)!=bool:
+            self.fail('CO.GLOBAL_MEMORY_SETTING','global_shared_memory must be Boolean.',f,'CO')
+        if self.shared_memory and self.mem_depth is None:
+            self.fail('CO.GLOBAL_MEMORY_SPEC','Shared memory requires depth and data_width.',f,'CO')
+        self.ready_types.update(self.shared_types)
+        if self.shared_memory:self.ready_types.update(('READ','WRITE'))
         for statement in f.body:self._statement(statement)
         if not self.commands:self.fail('CO.CFG_EMPTY','Function contains no operations.',f,'CO')
         # Only *reachable* successors count: structured if/else lowering can
@@ -302,7 +315,7 @@ class TransactionalCompiler:
         b.registers['output']={'next':list(r('output',self.return_width).bits),'init':0}
         for inp,width in self.inputs.items():b.registers['in_'+inp]={'next':list(r('in_'+inp,width).bits),'init':0}
         for var,width in self.locals.items():b.registers['var_'+var]={'next':list(r('var_'+var,width).bits),'init':0}
-        if self.mem_depth is not None:
+        if self.mem_depth is not None and not self.shared_memory:
             for i in range(self.mem_depth):b.registers[f'mem_{i}']={'next':list(r(f'mem_{i}',self.mem_width).bits),'init':0}
         for i,c in enumerate(self.commands):
             for stage in range(c.latency):b.registers[f'pc_{i}_{stage}']={'next':['@0'],'init':0}
@@ -332,18 +345,33 @@ class TransactionalCompiler:
                 a=mux(sel,a,b.extend(operand(c.args[0]),wa))
                 if len(c.args)>1:v=mux(sel,v,b.extend(operand(c.args[1]),wb))
             b.origin=f'{self.path}:shared_{kind}'
-            if kind=='ADD':result=b.add(a,v)
-            elif kind=='SUB':result=b.sub(a,v)
-            elif kind=='MUL':result=b.mul(a,v)
-            elif kind in ('AND','OR','XOR'):result=b.binary_gate(kind,a,v)
+            if kind in self.shared_types:
+                # Externalize the *actual datapath*. The parent builds one
+                # physical arithmetic network for all source-process clients.
+                result_width=max(x.width for _,x in entries)
+                b.inputs[f'unit_result_{kind.lower()}']=result_width
+                result=Bus(tuple(f'unit_result_{kind.lower()}[{j}]' for j in range(result_width)))
+                continue_result=True
+            else:
+                continue_result=False
+            if kind=='ADD' and not continue_result:result=b.add(a,v)
+            elif kind=='SUB' and not continue_result:result=b.sub(a,v)
+            elif kind=='MUL' and not continue_result:result=b.mul(a,v)
+            elif kind in ('AND','OR','XOR') and not continue_result:result=b.binary_gate(kind,a,v)
             elif kind=='NOT':result=bit(not_(b.is_nonzero(a)))
             elif kind=='INV':result=b.unary('NOT',a)
             elif kind=='NEG':result=b.unary('NEG',a)
             elif kind.startswith('BOOL_'):
                 op='AND' if kind=='BOOL_AND' else 'OR'
                 result=bit(b.gate(op,b.is_nonzero(a),b.is_nonzero(v)))
-            else:result=b.compare(kind,a,v)
+            elif not continue_result:result=b.compare(kind,a,v)
             for i,c in entries:computed[i]=b.extend(result,c.width)
+            if kind in self.shared_types:
+                outs_kind=kind.lower()
+                # Issued only after configured reservation latency, not while
+                # stalled or during reset. Operands are snapshots of inputs.
+                # The parent uses these to arbitrate and return a result.
+                setattr(self,f'_shared_bus_{outs_kind}',(a,v,result_width,entries))
         def memory_addr(i,c):
             addr=operand(c.args[0]);required=max(1,(self.mem_depth-1).bit_length())
             valid=b.compare('LT',addr,b.const(self.mem_depth,max(len(addr),required+1))).bits[0]
@@ -397,18 +425,38 @@ class TransactionalCompiler:
                 if c.kind=='MOVE':data_bus=b.extend(operand(c.args[0]),c.width)
                 elif c.kind=='READ':
                     addr,_=mem_info[i]
-                    data_bus=b.const(0,self.mem_width)
-                    for j in reversed(range(self.mem_depth)):
-                        eq=b.compare('EQ',addr,b.const(j,max(len(addr),max(1,(self.mem_depth-1).bit_length())))).bits[0]
-                        data_bus=mux(eq,data_bus,r(f'mem_{j}',self.mem_width))
+                    if self.shared_memory:
+                        data_bus=Bus(tuple(f'unit_result_read[{j}]' for j in range(self.mem_width)))
+                    else:
+                        data_bus=b.const(0,self.mem_width)
+                        for j in reversed(range(self.mem_depth)):
+                            eq=b.compare('EQ',addr,b.const(j,max(len(addr),max(1,(self.mem_depth-1).bit_length())))).bits[0]
+                            data_bus=mux(eq,data_bus,r(f'mem_{j}',self.mem_width))
                 else:data_bus=computed[i]
                 update('var_'+c.dst,data_bus,finish[i])
-            if c.kind=='WRITE':
+            if c.kind=='WRITE' and not self.shared_memory:
                 addr,_=mem_info[i];value=b.extend(operand(c.args[1]),self.mem_width)
                 for j in range(self.mem_depth):
                     eq=b.compare('EQ',addr,b.const(j,max(len(addr),max(1,(self.mem_depth-1).bit_length())))).bits[0]
                     update(f'mem_{j}',value,and_(finish[i],eq))
             if c.kind=='RETURN':update('output',b.extend(operand(c.args[0]),self.return_width),finish[i])
+        if self.shared_memory:
+            # READ/WRITE are externally acknowledged by a single arbitrated
+            # register-bank port. Invalid requests are acknowledged and faulted
+            # by the child, but the shared bank must never mutate for them.
+            b.inputs['unit_result_read']=self.mem_width
+            mem_ops=[(i,c) for i,c in enumerate(self.commands) if c.kind in ('READ','WRITE')]
+            issue='@0';write='@0'
+            width=max([len(mem_info[i][0]) for i,_ in mem_ops]+[max(1,(self.mem_depth-1).bit_length())])
+            addr=b.const(0,width);wdata=b.const(0,self.mem_width)
+            for i,c in mem_ops:
+                selecting=f'$pc_{i}_{c.latency-1}[0]'
+                issue=or_(issue,selecting)
+                addr=mux(selecting,addr,b.extend(mem_info[i][0],width))
+                if c.kind=='WRITE':
+                    write=or_(write,selecting)
+                    wdata=mux(selecting,wdata,b.extend(operand(c.args[1]),self.mem_width))
+            self._mem_interface=(and_(issue,no_stall,no_reset), write, addr, wdata)
         # Synchronous active-high RESET dominates every register update,
         # including stalls, controller phases, scratchpad and fault state.
         for reg_name,spec in b.registers.items():
@@ -422,6 +470,19 @@ class TransactionalCompiler:
         for kind in sorted(self.ready_types):
             states=[f'$pc_{i}_{j}[0]' for i,c in enumerate(self.commands) if c.kind==kind for j in range(c.latency)]
             outs['unit_active_'+kind.lower()]=[or_(*states)]
+        for kind in sorted(self.shared_types):
+            a,v,result_width,entries=getattr(self,f'_shared_bus_{kind.lower()}') if hasattr(self,f'_shared_bus_{kind.lower()}') else (None,None,None,None)
+            if entries is None:continue
+            issue=or_(*(f'$pc_{i}_{c.latency-1}[0]' for i,c in entries))
+            outs[f'unit_request_{kind.lower()}']=[and_(issue,no_stall,no_reset)]
+            outs[f'unit_a_{kind.lower()}']=list(a.bits)
+            outs[f'unit_b_{kind.lower()}']=list(v.bits)
+        if self.shared_memory:
+            request,write,addr,wdata=self._mem_interface
+            outs['unit_request_mem']=[request]
+            outs['unit_mem_write']=[write]
+            outs['unit_mem_addr']=list(addr.bits)
+            outs['unit_mem_data']=list(wdata.bits)
         meta={'top':name,'source':self.path,'source_sha256':hashlib.sha256(source.encode()).hexdigest(),
               'return_width':self.return_width,'return_signed':False,'strategies':b.strategies,
               'schedule':{'mode':'transactional','instructions':[{**asdict(c),'args':[asdict(x) for x in c.args]} for c in self.commands],
@@ -430,7 +491,8 @@ class TransactionalCompiler:
                            for i,c in enumerate(self.commands) if c.kind in physical_units],
                           'physical_units':physical_units,'operator_uses':uses,
                           'memory':{'depth':self.mem_depth,'data_width':self.mem_width} if self.mem_depth is not None else None,
-                          'ready_types':sorted(self.ready_types),
+                          'ready_types':sorted(self.ready_types),'global_shared_types':sorted(self.shared_types),
+                          'global_shared_memory':self.shared_memory,
                           'protocol':'Synchronous active-high RESET initializes controller and memory. START accepted when READY=1 and STALL=0 and RESET=0. DONE is a clocked pulse, held on STALL. FAULT marks invalid memory address. Physical operator timing NOT characterized.',
                           'latency_semantics':'Reservation cycles; actual logic remains combinational inside shared units.',
                           'overlapping_transactions':False},'compiler':'chipcompiler transactional v0.7'}

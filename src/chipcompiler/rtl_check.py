@@ -65,6 +65,61 @@ def make_transaction_vectors(d:DLS, count:int=64, seed:int=2781)->list[dict]:
 
 
 
+def make_tagged_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
+    """Deterministic tagged ready/valid stimulus, with modelled external latency.
+
+    Expected outputs are evaluated from DLS independently of exported RTL.
+    The independent Python oracle additionally checks semantic correctness.
+    """
+    if not 32<=count<=256:
+        raise ValueError('Tagged fabric requires 32..256 RTL stimulus cycles.')
+    rng=random.Random(seed)
+    spec=d.metadata['schedule'];n=spec['clients'];width=d.inputs['a_0'];tags=d.inputs['request_tag_0']
+    external=spec['operator']=='external'
+    sim=d.new_simulator();vectors=[];future=None;mem_future=None;mem_bank={}
+    for tick in range(count):
+        v={key:0 for key in d.inputs}
+        v['reset']=int(tick==0 or tick==count//2)
+        v['stall']=int(tick%17==9)
+        for i in range(n):
+            v[f'request_tag_{i}']=(tick+i*7)%(1<<tags)
+            v[f'request_{i}']=int(tick%5!=4)
+            v[f'a_{i}']=rng.randrange(1<<width);v[f'b_{i}']=rng.randrange(1<<width)
+            v[f'response_ready_{i}']=int(tick%7 not in (2,3))
+            if f'opcode_{i}' in v:v[f'opcode_{i}']=rng.randrange(4)
+            if f'select_{i}' in v:v[f'select_{i}']=rng.randrange(2)
+        if external:
+            v['operator_request_ready']=int(tick%11 not in (3,4))
+            if future is not None and tick>=future[0]:
+                v['operator_response_valid']=1;v['operator_response_data']=future[1]
+        memory_external=spec.get('memory_backend')=='external'
+        if memory_external:
+            v['memory_request_ready']=int(tick%9 not in (3,4))
+            if mem_future is not None and tick>=mem_future[0]:
+                v['memory_response_valid']=1;v['memory_response_data']=mem_future[1]
+                v['memory_response_fault']=mem_future[2]
+        observed=sim.step(v,clock=False)
+        if v['reset']:future=None;mem_future=None
+        elif external:
+            if observed['operator_request_valid'] and v['operator_request_ready']:
+                if future is not None:raise ValueError('Operator has overlapping responses in RTL vector generator')
+                op=observed['operator_request_opcode'];a=observed['operator_request_a'];b=observed['operator_request_b']
+                future=(tick+3,((a+b) if op==0 else a*b)&((1<<width)-1))
+            if observed['operator_response_ready'] and v['operator_response_valid']:future=None
+        if memory_external and not v['reset']:
+            if observed['memory_response_ready'] and v['memory_response_valid']:mem_future=None
+            if observed['memory_request_valid'] and v['memory_request_ready']:
+                if mem_future is not None:raise ValueError('Overlapping external memory request in RTL vector generator')
+                address=observed['memory_request_address'];write=observed['memory_request_write']
+                fault=int(address>=spec['memory_depth'])
+                result=0 if write or fault else mem_bank.get(address,0)
+                if write and not fault:mem_bank[address]=observed['memory_request_data']
+                mem_future=(tick+4,result,fault)
+        vectors.append(v)
+        sim.step(v,clock=True)
+    return vectors
+
+
 def make_fabric_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
     """Deterministic clock-edge requests and environment-driven responses.
 
@@ -80,6 +135,7 @@ def make_fabric_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
     sim=d.new_simulator();result=[]
     # Track one outstanding external service operation, independent from DLS.
     outstanding=None
+    memory_inflight=None;memory_bank={}
     due=0
     accepted_requests=0
     responses=0
@@ -94,6 +150,12 @@ def make_fabric_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
             if outstanding is not None and clock>=due:
                 v['operator_response_valid']=1
                 v['operator_response_data']=outstanding
+        if spec.get('memory_backend')=='external':
+            v['memory_request_ready']=int(clock%9 not in (3,4))
+            if memory_inflight is not None and clock>=memory_inflight[0]:
+                v['memory_response_valid']=1
+                v['memory_response_data']=memory_inflight[1]
+                v['memory_response_fault']=memory_inflight[2]
         observed=sim.step(v,clock=False)
         for i in range(clients):
             # Issuing clients only drive request when their slot is free.
@@ -113,12 +175,50 @@ def make_fabric_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
             due=clock+1+(clock%7)
         if external and observed['operator_response_ready'] and v['operator_response_valid']:
             outstanding=None;responses+=1
+        if spec.get('memory_backend')=='external' and not v['reset']:
+            if observed['memory_response_ready'] and v['memory_response_valid']:memory_inflight=None
+            if observed['memory_request_valid'] and v['memory_request_ready']:
+                if memory_inflight is not None:raise ValueError('Overlapping memory transactions in RTL stimulus')
+                address=observed['memory_request_address'];write=observed['memory_request_write']
+                fault=int(address>=spec['memory_depth'])
+                val=0 if write or fault else memory_bank.get(address,0)
+                if write and not fault:memory_bank[address]=observed['memory_request_data']
+                memory_inflight=(clock+4,val,fault)
         result.append(v)
         sim.step(v,clock=True)
-        if v['reset']:outstanding=None
+        if v['reset']:outstanding=None;memory_inflight=None
     if accepted_requests<3:
         raise ValueError('Fabric stimulus contained too few accepted requests.')
     return result
+
+def make_source_process_vectors(d:DLS,count:int=128,seed:int=2781)->list[dict]:
+    """Synchronous batches of process starts, contention, resets and stalls.
+
+    Stimulus depends only on the DLS port/interface contract, not on the
+    exported RTL. check_rtl independently compares output traces per cycle.
+    """
+    if not 32<=count<=256:
+        raise ValueError('Source-process RTL requires 32..256 sample cycles.')
+    rng=random.Random(seed)
+    clients=d.metadata['schedule']['source_bindings']
+    sim=d.new_simulator(); result=[];completions=0
+    for tick in range(count):
+        v={k:rng.getrandbits(width) for k,width in d.inputs.items()}
+        v['reset']=int(tick==0 or tick==count//2)
+        ready=sim.step({**v,'reset':0,**{entry['client']+'_start':0 for entry in clients},
+                         **{entry['client']+'_stall':0 for entry in clients}},clock=False)
+        for entry in clients:
+            ident=entry['client']
+            v[ident+'_stall']=int(tick%19==7)
+            v[ident+'_start']=int(not v['reset'] and ready[ident+'_ready'] and tick%4 in (1,2))
+            for port in d.inputs:
+                if port.startswith(ident+'_unit_ready_'):v[port]=1
+        result.append(v)
+        observed=sim.step(v,clock=True)
+        completions+=sum(bool(observed[entry['client']+'_done']) for entry in clients)
+    if completions<2:raise ValueError('Insufficient completed source transactions in RTL test stimulus.')
+    return result
+
 
 def make_testbench(d:DLS,vectors:list[dict])->str:
     d.validate()
@@ -161,6 +261,8 @@ def check_rtl(d:DLS,rtl:Path,out:Path,issues,events,run_options:dict|None=None,
     try:
         vectors=(make_transaction_vectors(d,vector_count) if scheduling in ('transactional','time_share')
                  else make_fabric_vectors(d,max(vector_count,32)) if scheduling=='concurrent_fabric'
+                 else make_tagged_vectors(d,max(vector_count,32)) if scheduling in ('tagged_fabric','bound_fabric')
+                 else make_source_process_vectors(d,max(vector_count,32)) if scheduling in ('source_processes','global_source_processes')
                  else make_vectors(d,vector_count) if not scheduling
                  else None)
     except ValueError as exc:

@@ -1,0 +1,334 @@
+{
+  "count": 26,
+  "duration_seconds": 6.44,
+  "projects": [
+    {
+      "project": "axi_lite_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "bounded_loop_scheduler",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "c_arithmetic",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "clocked_hierarchy",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "concurrent_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "conditional_alu",
+      "status": "SUCCESS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "conditional_scheduler",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "counter",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "explicit_network",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "network": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "external_memory_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "global_auto_operators",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "scheduling": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "global_shared_memory",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "scheduling": "PASS",
+        "equivalence": "PASS_PROTOCOL_AND_ISOLATED_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "global_shared_processes",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "scheduling": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "hierarchical_modules",
+      "status": "SUCCESS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "mcd_bound_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "mcd_conditional_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "nested_named_modules",
+      "status": "SUCCESS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "pipelined_arithmetic",
+      "status": "SUCCESS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "resource_sharing",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "source_processes",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "tagged_fabric",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "generate": "PASS",
+        "equivalence": "NOT_APPLICABLE",
+        "protocol_check": "PASS",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "time_shared_alu",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "tmp_generated",
+      "status": "SUCCESS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "NOT_REQUESTED",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_EXHAUSTIVE",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "transactional_c",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "transactional_controller",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    },
+    {
+      "project": "transactional_memory",
+      "status": "SUCCESS_WITH_WARNINGS",
+      "stages": {
+        "project": "PASS",
+        "scheduling": "PASS",
+        "module_allocation": "PASS",
+        "generate": "PASS",
+        "equivalence": "PASS_SAMPLED",
+        "export": "PASS"
+      },
+      "issues": []
+    }
+  ]
+}

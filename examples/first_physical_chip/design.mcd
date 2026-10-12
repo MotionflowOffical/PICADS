@@ -1,0 +1,7 @@
+top: first_chip
+description: Small synchronous 4-bit register for verified RTL-to-GDS qualification
+modules:
+  - name: FirstChipRegister
+    function: first_chip
+    inputs: {data: 4, enable: 1, reset: 1}
+    outputs: {result: 4}

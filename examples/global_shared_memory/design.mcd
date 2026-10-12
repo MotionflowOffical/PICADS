@@ -1,0 +1,7 @@
+top: PICADSSharedMemory
+description: Two concurrent source-process FSMs using one shared register-bank port.
+concurrent_clients:
+  - name: writer
+    function: store
+  - name: reader
+    function: load

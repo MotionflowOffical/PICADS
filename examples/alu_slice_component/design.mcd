@@ -1,0 +1,7 @@
+top: alu_slice
+description: One 4-bit unsigned ALU slice of a larger proposed processor, not a complete chip.
+modules:
+  - name: ALUSlice
+    function: alu_slice
+    inputs: {a: 4, b: 4, op: 2}
+    outputs: {result: 5}

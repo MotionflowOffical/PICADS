@@ -1,0 +1,3 @@
+schedule:
+  mode: source_processes
+  global_shared_types: auto

@@ -21,6 +21,7 @@ class FabricConfig:
     width:int=8
     depth:int=8
     operator:str='builtin'  # builtin or external
+    memory_backend:str='builtin' # builtin register bank or external ready/valid port
 
     def validate(self):
         if type(self.clients)!=int or not 2<=self.clients<=8:
@@ -31,6 +32,8 @@ class FabricConfig:
             raise ValueError('CO.FABRIC_DEPTH: depth must be integer 1..32')
         if self.operator not in ('builtin','external'):
             raise ValueError('CO.FABRIC_OPERATOR: operator must be builtin or external')
+        if self.memory_backend not in ('builtin','external'):
+            raise ValueError('CO.FABRIC_MEMORY_BACKEND: memory_backend must be builtin or external')
 
 
 def concurrent_fabric(config:FabricConfig=FabricConfig(),name:str='concurrent_fabric')->DLS:
@@ -45,6 +48,9 @@ def concurrent_fabric(config:FabricConfig=FabricConfig(),name:str='concurrent_fa
     if config.operator=='external':
         ports.update({'operator_request_ready':1,'operator_response_valid':1,
                       'operator_response_data':w})
+    if config.memory_backend=='external':
+        ports.update({'memory_request_ready':1,'memory_response_valid':1,
+                      'memory_response_data':w,'memory_response_fault':1})
     b=LogicBuilder(name,ports)
     def bit(p):return Bus((p,))
     def data(p,sz):return Bus(tuple(f'{p}[{j}]' for j in range(sz)))
@@ -86,7 +92,11 @@ def concurrent_fabric(config:FabricConfig=FabricConfig(),name:str='concurrent_fa
     # newly arrived higher-priority client during external backpressure.
     for i in range(n):reg(f'alu_offer_{i}')
     for i in range(n):reg(f'alu_turn_{i}',init=int(i==0));reg(f'mem_turn_{i}',init=int(i==0))
-    for j in range(depth):reg(f'memory_{j}',w)
+    if config.memory_backend=='builtin':
+        for j in range(depth):reg(f'memory_{j}',w)
+    else:
+        reg('memory_busy')
+        for i in range(n):reg(f'memory_owner_{i}');reg(f'memory_offer_{i}')
     if config.operator=='builtin':reg('builtin_valid');reg('builtin_result',w)
 
     unstalled=AND(inv('stall[0]'),inv('reset[0]'))
@@ -188,46 +198,78 @@ def concurrent_fabric(config:FabricConfig=FabricConfig(),name:str='concurrent_fa
         set_bit(f'alu_owner_{i}','@1',alu_accept[i])
         set_bit(f'alu_owner_{i}','@0',alu_complete)
 
-    # A single fair memory port, one read or write at most per clock.
+    # One fair memory issue port. The external variant is a genuinely
+    # decoupled request/response protocol; read/write effects are owned by
+    # the external memory device, not by a fake shadow register bank.
     mem_select=choose_rr(pending_mem,'mem_turn')
-    mem_grants=[AND(mem_select[i],unstalled) for i in range(n)]
+    if config.memory_backend=='builtin':
+        mem_grants=[AND(mem_select[i],unstalled) for i in range(n)]
+        memory_done=mem_grants[:]
+        memory_value=[];memory_fault=[]
+        for i in range(n):
+            addr=rb(f'operand_a_{i}',w)
+            valid=b.compare('LT',b.extend(addr,max(w,depth.bit_length()+1)),
+                            b.const(depth,max(w,depth.bit_length()+1))).bits[0]
+            memory_fault.append(inv(valid))
+            result=b.const(0,w)
+            for j in reversed(range(depth)):
+                at=equal(addr,b.const(j,w))
+                result=sel(at,result,rb(f'memory_{j}',w))
+            writing=rb(f'opcode_{i}',2).bits[0]
+            memory_value.append(sel(writing,result,b.const(0,w)))
+            for j in range(depth):
+                on_address=equal(addr,b.const(j,w))
+                write=AND(mem_grants[i],writing,valid,on_address)
+                set_reg(f'memory_{j}',rb(f'operand_b_{i}',w),write)
+    else:
+        has_offer=OR(*(f'$memory_offer_{i}[0]' for i in range(n)))
+        offer_new=AND(inv('$memory_busy[0]'),inv(has_offer),unstalled)
+        for i in range(n):set_bit(f'memory_offer_{i}','@1',AND(offer_new,mem_select[i]))
+        request_valid=AND(has_offer,inv('$memory_busy[0]'),unstalled)
+        issue=AND(request_valid,'memory_request_ready[0]')
+        mem_grants=[AND(issue,f'$memory_offer_{i}[0]') for i in range(n)]
+        for i in range(n):set_bit(f'memory_offer_{i}','@0',mem_grants[i])
+        selected_opcode=b.const(0,2);selected_addr=b.const(0,w);selected_data=b.const(0,w)
+        for i in range(n):
+            selected=f'$memory_offer_{i}[0]'
+            selected_opcode=sel(selected,selected_opcode,rb(f'opcode_{i}',2))
+            selected_addr=sel(selected,selected_addr,rb(f'operand_a_{i}',w))
+            selected_data=sel(selected,selected_data,rb(f'operand_b_{i}',w))
+        outputs.update({'memory_request_valid':[request_valid],
+                        'memory_request_write':[selected_opcode.bits[0]],
+                        'memory_request_address':list(selected_addr.bits),
+                        'memory_request_data':list(selected_data.bits),
+                        'memory_response_ready':[AND('$memory_busy[0]',unstalled)],
+                        'memory_busy':['$memory_busy[0]'],'memory_reset':['reset[0]'],
+                        'memory_unsolicited_response':[AND('memory_response_valid[0]',
+                            inv('$memory_busy[0]'),inv('reset[0]'))]})
+        completed=AND(outputs['memory_response_ready'][0],'memory_response_valid[0]')
+        set_bit('memory_busy','@1',issue)
+        set_bit('memory_busy','@0',completed)
+        for i in range(n):
+            set_bit(f'memory_owner_{i}','@1',mem_grants[i])
+            set_bit(f'memory_owner_{i}','@0',completed)
+        memory_done=[AND(completed,f'$memory_owner_{i}[0]') for i in range(n)]
+        memory_value=[data('memory_response_data',w)]*n
+        memory_fault=['memory_response_fault[0]']*n
     advance_rr('mem_turn',mem_grants)
     for i in range(n):outputs[f'memory_grant_{i}']=[mem_grants[i]]
-    memory_value=[];memory_fault=[]
-    for i in range(n):
-        addr=rb(f'operand_a_{i}',w)
-        valid=b.compare('LT',b.extend(addr,max(w,depth.bit_length()+1)),
-                        b.const(depth,max(w,depth.bit_length()+1))).bits[0]
-        memory_fault.append(inv(valid))
-        result=b.const(0,w)
-        for j in reversed(range(depth)):
-            at=equal(addr,b.const(j,w))
-            result=sel(at,result,rb(f'memory_{j}',w))
-        memory_value.append(result)
-        writing=rb(f'opcode_{i}',2).bits[0]
-        for j in range(depth):
-            on_address=equal(addr,b.const(j,w))
-            write=AND(mem_grants[i],writing,valid,on_address)
-            set_reg(f'memory_{j}',rb(f'operand_b_{i}',w),write)
 
     for i in range(n):
-        memory_done=mem_grants[i]
         alu_done=AND(alu_complete,f'$alu_owner_{i}[0]')
         dispatch=OR(mem_grants[i],alu_accept[i])
         # Independent transactions are in-flight across different clients.
         # A client cannot be both an ALU and memory dispatch in the same edge.
         set_bit(f'pending_{i}','@1',accepted[i])
         set_bit(f'pending_{i}','@0',dispatch)
-        set_bit(f'active_{i}','@1',alu_accept[i])
-        set_bit(f'active_{i}','@0',alu_done)
-        finish=OR(memory_done,alu_done)
+        set_bit(f'active_{i}','@1',OR(alu_accept[i],mem_grants[i]) if config.memory_backend=='external' else alu_accept[i])
+        set_bit(f'active_{i}','@0',OR(alu_done,memory_done[i]) if config.memory_backend=='external' else alu_done)
+        finish=OR(memory_done[i],alu_done)
         set_bit(f'response_valid_{i}','@1',finish)
         set_bit(f'response_valid_{i}','@0',consume[i])
-        set_bit(f'response_fault_{i}',memory_fault[i],memory_done)
+        set_bit(f'response_fault_{i}',memory_fault[i],memory_done[i])
         set_bit(f'response_fault_{i}','@0',alu_done)
-        write=rb(f'opcode_{i}',2).bits[0]
-        mv=sel(write,memory_value[i],b.const(0,w))
-        set_reg(f'response_data_{i}',mv,memory_done)
+        set_reg(f'response_data_{i}',memory_value[i],memory_done[i])
         set_reg(f'response_data_{i}',operator_response_data,alu_done)
         outputs[f'pending_{i}']=[f'$pending_{i}[0]']
         outputs[f'active_{i}']=[f'$active_{i}[0]']
@@ -238,9 +280,9 @@ def concurrent_fabric(config:FabricConfig=FabricConfig(),name:str='concurrent_fa
           'schedule':{'mode':'concurrent_fabric','clients':n,'operator':config.operator,
                       'separate_parallel_ports':['operator','memory'],
                       'pending_capacity_per_client':1,'response_capacity_per_client':1,
-                      'memory_ports':1,'memory_depth':depth,'width':w,
+                      'memory_ports':1,'memory_depth':depth,'memory_backend':config.memory_backend,'width':w,
                       'variable_latency':'external ready/valid response' if config.operator=='external' else 'builtin single-stage result register',
-                      'protocol':'Synchronous reset, one outstanding per client; input accepted on request && request_ready, response held until response_ready; independent fair operator and memory ports; stall freezes all state and suppresses external handshakes. External unit must honor operator_reset.'},
+                      'protocol':'Synchronous reset, one outstanding per client; input accepted on request && request_ready, response held until response_ready; independent fair operator and memory ports; stall freezes all state and suppresses external handshakes. External units must honor operator_reset/memory_reset when present.'},
           'strategies':b.strategies,'verification':'Requires protocol/transaction-level testing; source-equivalence not applicable to a service fabric.'}
     dls=DLS(name,ports,outputs,b.nodes,b.registers,meta)
     dls.validate()

@@ -1,21 +1,21 @@
-# Remaining engineering after v0.8.0
+# PICADS — remaining v1.0 blockers after v0.15
 
-## 1. Full concurrent high-level synthesis and MCD integration
+**Scope freeze:** Do not treat the deferred capabilities in [FUTURE_FEATURES.md](FUTURE_FEATURES.md) as requirements for PICADS v1.0. The v1 acceptance target is defined in [V1_SCOPE_AND_ACCEPTANCE.md](V1_SCOPE_AND_ACCEPTANCE.md).
 
-The v0.8 fabric is a **real but bounded synchronous hardware resource service**. It is not a general compiler translating independent arbitrary Python/C++ programs into concurrently executing architectures. Still required: discovering resource requests in MCD modules, automatic cross-module routing/binding, per-module scheduling state machines, real context/transaction IDs, multiple tasks in flight per client, SSA/value lifetime analysis, data hazards, burst interfaces and deadlock checking across arbitrary feedback networks.
+## Work required before a real v1 release
 
-## 2. External operator and memory protocols
+1. **Execute first-chip acceptance on Windows/WSL with real tools.** The new `RUN_V1_ACCEPTANCE.bat` must run Icarus RTL equivalence, Yosys synthesis, LibreLane placement/routing and Qt smoke tests on the user's system; collect its diagnostic ZIP and fix any real errors.
+2. **Establish a supported PDK.** Select a verifiable digital standard-cell technology supported by LibreLane; confirm library choice, legal layers, power pins, accurate timing and physical constraints. Custom TFT materials require separate device characterization and library creation.
+3. **Resolve physical errors from evidence, not assumptions.** Only actual fresh-run GDSII with correct top, routing views and reported signoff data counts as physical implementation. Extract and preserve stage logs and failed constraints.
+4. **Native RTL/formal cross-checks.** Use the installed RTL simulator for source-to-DLS/RTL comparisons. Where possible, prove bounded properties with a real solver. Sampled Python tests are not enough for silicon confidence.
+5. **Finish the GUI runtime workflows.** Exercise project opening, source editor, dependency picker, preflight button, DLS simulation, RTL export, physical launch and GDS inspection in real Qt on Windows.
+6. **Finalize documentation and install package.** Provide an explicit v1 subset/language contract, supported platform/PDK/tool versions, deterministic install/run scripts and artifact/provenance logs.
+7. **Manufacturing signoff remains outside automated v1 self-certification.** Obtain qualified DRC/LVS/STA/parasitic/power/antenna verification and foundry acceptance separately before describing masks as manufacturable.
 
-Expand from one external single-owner untagged ALU to multiple characterized pipelined operator instances, ready/valid across stalls without a shared global stall assumption, explicit flush semantics, transaction-tag matching and cancellation. Expand one register-bank memory port to SRAM macros/AXI-like protocols with variable access latency, bandwidth/resource limits, coherence when required and independently verified memory ordering.
+**Next practical action:** Run `RUN_PICADS_AUTOTEST.bat` after registering native external dependencies, then upload `validation/PICADS_v0.15.0_automated_diagnostics.zip`. The automated report explains PASS vs UNAVAILABLE vs FAIL per subsystem.
 
-## 3. Independent executable tests on target platform
+## v0.15 verification mechanism
 
-Run `RUN_FULL_VALIDATION.bat` and inspect the returned ZIP. Fix real GUI exceptions and independent RTL-vs-DLS mismatches if they appear. Ensure actual RTL simulation and Yosys pass on a fully installed Windows/WSL2 setup; investigate clock/reset timing and synthesizability of the generated sequential logic. Expand formal properties beyond deterministic sampled protocol checks.
+`RUN_PICADS_AUTOTEST.bat` runs deterministic CLI workflows, injects source faults, rebuilds a source-only ALU component, calls the independent 1,024-case truth-table test and, where available, exercises Qt widgets automatically. It also attempts native ALU RTL/synthesis and the first-chip source-to-GDS flow. Optional `--full-regression` isolates historical tests to prevent a single hung test from masking the others.
 
-## 4. Physical design and custom fabrication
-
-Use a known-good open process before a custom thin-film transistor library. Characterize transistor and wire behavior, standard-cell timing/area/leakage, RC extraction, LEF/GDS, DRC/LVS decks, clocking/power and all relevant corners. Run actual Yosys/LibreLane/OpenROAD, verify extracted connectivity and physical checks. A GDS exists is NOT manufacturing signoff or mask preparation.
-
-## 5. GUI and diagnostic improvements
-
-End-to-end native PySide6 interaction tests and project recovery tests on actual Windows. Add interactive multi-client timeline and resource contention heatmaps, real native error links to source/CO and actionable remediation. Preserve the existing causal error-chain and no-silent-fallback policy.
+Native DRC/LVS/STA and physical process qualification remain open until a real installed and characterized process and EDA toolchain produce passing independent evidence. The acceptance runner is not a substitute for foundry signoff.

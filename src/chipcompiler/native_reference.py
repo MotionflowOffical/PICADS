@@ -22,7 +22,8 @@ class NativeReferenceResult:
 def verify_native(original_path:Path,dls:DLS,source:str,timeout:int=60,max_vectors:int=256)->NativeReferenceResult:
     suffix=original_path.suffix.lower()
     is_cpp=suffix in ('.cpp','.cc','.cxx')
-    compiler=shutil.which('g++' if is_cpp else 'gcc')
+    from .dependencies import resolve_tool, dependency_environment
+    compiler=resolve_tool('g++' if is_cpp else 'gcc')
     if not compiler:return NativeReferenceResult('UNAVAILABLE',0,message='GCC/G++ executable not on PATH')
     if dls.registers:return NativeReferenceResult('UNAVAILABLE',0,message='Native reference only supports combinational sources')
     f=next((n for n in ast.parse(source).body if isinstance(n,ast.FunctionDef) and n.name==dls.name),None)

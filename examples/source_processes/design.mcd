@@ -1,0 +1,9 @@
+top: SourceProcesses
+description: Concurrent independent source-process FSM compilation; no inter-process shared operator.
+concurrent_clients:
+  - name: lane0
+    function: choose
+  - name: lane1
+    function: accumulate
+  - name: lane2
+    function: choose

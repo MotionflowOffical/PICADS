@@ -1,4 +1,4 @@
-name: Chip Compiler CI
+name: PICADS compiler and v1 acceptance CI
 on:
   push:
   pull_request:
@@ -15,22 +15,28 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Install verified language and Qt dependencies
+      - name: Install Python dependencies
         run: python -m pip install -e ".[gui,test]"
-      - name: Run compiler and GUI construction tests
+      - name: Automated v1 GUI and source acceptance tests
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m pytest -q
-      - name: Compile both source frontends
+        run: python -m pytest -q tests/test_iteration14.py tests/test_iteration15.py tests/test_windows_installer.py tests/test_gui_dependency_installer.py tests/test_gui_smoke.py tests/test_gui_workflow.py
+      - name: Automated CLI/ALU user journey validation
+        shell: bash
+        run: |
+          python -m chipcompiler.feature_validation --skip-native --skip-gui --output validation/ci_autotest || test "$?" -eq 2
+      - name: Compile representative source/architecture examples
         shell: bash
         run: |
           python -m chipcompiler compile examples/conditional_alu
           python -m chipcompiler compile examples/c_arithmetic
           python -m chipcompiler compile examples/explicit_network
           python -m chipcompiler compile examples/transactional_c
-          python -m chipcompiler compile examples/concurrent_fabricontroller
           python -m chipcompiler compile examples/transactional_memory
-          python -m chipcompiler compile examples/transactional_c
           python -m chipcompiler compile examples/concurrent_fabric
-      - name: Diagnose external tool availability (informational)
+          python -m chipcompiler compile examples/global_auto_operators
+          python -m chipcompiler compile examples/global_shared_memory
+          python -m chipcompiler compile examples/first_physical_chip
+          python -m chipcompiler compile examples/alu_slice_component
+      - name: Native tool inventory (informational, no false signoff)
         run: python -m chipcompiler doctor

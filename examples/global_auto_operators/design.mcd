@@ -1,0 +1,7 @@
+top: PICADSAutoOperators
+description: Auto-selected global ADD/SUB/LT operators shared by two concurrent FSMs.
+concurrent_clients:
+  - name: channel_a
+    function: first
+  - name: channel_b
+    function: second

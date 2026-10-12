@@ -1,0 +1,8 @@
+top: BoundArithmeticFabric
+description: Automatically bind source-defined stateless arithmetic clients to a concurrent tagged fabric
+concurrent_clients:
+  - name: accumulator
+    function: sum_word
+  - name: multiplier
+    function: multiply_word
+modules: []

@@ -1,0 +1,6 @@
+top: ConditionalArithmeticFabric
+description: MCD clients with per-transaction Boolean ADD/MUL selection
+concurrent_clients:
+  - {name: arithmetic_a, function: arithmetic_select}
+  - {name: arithmetic_b, function: reverse_select}
+modules: []

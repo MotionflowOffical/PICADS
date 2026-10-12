@@ -1,0 +1,164 @@
+[
+  {
+    "name": "axi_lite_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "bounded_loop_scheduler",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "c_arithmetic",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "clocked_hierarchy",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "concurrent_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "conditional_alu",
+    "status": "SUCCESS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "conditional_scheduler",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "counter",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "explicit_network",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "external_memory_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "first_physical_chip",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "global_auto_operators",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "global_shared_memory",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_PROTOCOL_AND_ISOLATED_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "global_shared_processes",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "hierarchical_modules",
+    "status": "SUCCESS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "mcd_bound_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "mcd_conditional_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "nested_named_modules",
+    "status": "SUCCESS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "pipelined_arithmetic",
+    "status": "SUCCESS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "resource_sharing",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "source_processes",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "tagged_fabric",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "NOT_APPLICABLE",
+    "export": "PASS"
+  },
+  {
+    "name": "time_shared_alu",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "tmp_generated",
+    "status": "SUCCESS",
+    "equivalence": "PASS_EXHAUSTIVE",
+    "export": "PASS"
+  },
+  {
+    "name": "transactional_c",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "transactional_controller",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  },
+  {
+    "name": "transactional_memory",
+    "status": "SUCCESS_WITH_WARNINGS",
+    "equivalence": "PASS_SAMPLED",
+    "export": "PASS"
+  }
+]

@@ -6,7 +6,7 @@ metrics actually exist. Even DRC/LVS/timing pass is not foundry qualification.
 from __future__ import annotations
 import json
 from pathlib import Path
-from dataclasses import dataclass,asdict
+from dataclasses import dataclass,asdict,field
 from .maskinspect import inspect_gds,GDSFormatError
 
 @dataclass
@@ -17,9 +17,10 @@ class PhysicalEvidence:
     metrics:str|None
     checks:dict
     notes:list[str]
+    artifacts:dict=field(default_factory=dict)
     def as_dict(self):return asdict(self)
 
-def inspect_librelane(run_dir:Path)->PhysicalEvidence:
+def inspect_librelane(run_dir:Path,expected_top:str|None=None)->PhysicalEvidence:
     run_dir=Path(run_dir).resolve()
     final=run_dir/'final'
     gds=[]
@@ -27,12 +28,21 @@ def inspect_librelane(run_dir:Path)->PhysicalEvidence:
         if (final/folder).is_dir():
             gds.extend(str(p) for p in (final/folder).rglob('*') if p.is_file() and p.suffix.lower() in ('.gds','.gdsii') and p.stat().st_size>0)
     mp=final/'metrics.json'
-    metrics=None;checks={};notes=[]
-    readable=[]
+    metrics=None;checks={};notes=[];artifacts={}
+    from .physical_flow import artifact_hash
+    readable=[];found_top=False
     for name in gds:
         try:
             inspection=inspect_gds(Path(name))
+            if inspection.elements == 0:
+                checks['gds_integrity']={'status':'FAIL','file':name,
+                                         'reason':'GDS contains zero geometric/reference elements'}
+                notes.append('Empty GDS element inventory: '+name)
+                continue
             readable.append(name)
+            found_top = found_top or (expected_top in inspection.structures if expected_top else False)
+            artifacts.setdefault('gds',[]).append({'path':name,'sha256':artifact_hash(name),
+                                                    'bytes':Path(name).stat().st_size})
             checks.setdefault('gds_integrity',{'status':'PASS','libraries':[]})['libraries'].append({
                 'file':name,'library':inspection.library,'structures':len(inspection.structures),
                 'elements':inspection.elements})
@@ -41,9 +51,29 @@ def inspect_librelane(run_dir:Path)->PhysicalEvidence:
                                      'code':getattr(exc,'code','GDS.READ_ERROR')}
             notes.append('GDS integrity error for '+name+': '+str(exc))
     gds=readable
+    if expected_top:
+        checks['expected_top']={'status':'PASS' if found_top else 'FAIL',
+                                'name':expected_top, 'reason':None if found_top else 'Expected top cell absent from GDS structures'}
+    for label,folders,suffixes in (
+        ('routed_def',('def',),('.def',)),
+        ('final_netlist',('nl','pnl'),('.v',)),
+        ('layout_lef',('lef',),('.lef',)),
+        ('parasitics',('spef',),('.spef',)),
+    ):
+        candidates=[]
+        for folder in folders:
+            base=final/folder
+            if base.is_dir():
+                candidates.extend(p for p in base.rglob('*') if p.is_file() and p.suffix.lower() in suffixes and p.stat().st_size>0)
+        if candidates:
+            artifacts[label]=[{'path':str(p),'sha256':artifact_hash(p),'bytes':p.stat().st_size}
+                              for p in sorted(candidates)[:20]]
+        else:
+            artifacts.setdefault('missing_optional',[]).append(label)
 
     if mp.is_file():
         metrics=str(mp)
+        artifacts['metrics']={'path':str(mp),'sha256':artifact_hash(mp),'bytes':mp.stat().st_size}
         try:
             data=json.loads(mp.read_text(encoding='utf-8'))
             if not isinstance(data,dict):raise ValueError('metrics root is not a JSON object')
@@ -83,4 +113,4 @@ def inspect_librelane(run_dir:Path)->PhysicalEvidence:
     elif any(c['status']=='FAIL' for c in checks.values()):status='FAIL'
     else:status='LAYOUT_GENERATED'
     notes.append('Manufacturing mask signoff not established: foundry rule decks, mask layers, corners and qualification require independent evidence')
-    return PhysicalEvidence(status,str(run_dir),gds,metrics,checks,notes)
+    return PhysicalEvidence(status,str(run_dir),gds,metrics,checks,notes,artifacts)

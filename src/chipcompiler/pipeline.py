@@ -16,6 +16,7 @@ from .ir import DLS
 from .library import try_reuse
 from .architecture import analyze,check_requirements,apply_mcd_names,count_instantiated_operators
 from .physical import inspect_librelane
+from .physical_flow import physical_preflight, make_physical_handoff, verify_handoff_inputs
 from .native_reference import verify_native
 from .tools import run_external,probe,write_librelane_config
 
@@ -108,7 +109,9 @@ class BuildSession:
         if self.issues.errors:
             for stage in ('generate','equivalence','export'):self._block(stage)
             return
-        if (self.project.co.get('schedule') or {}).get('mode')=='concurrent_fabric':
+        if (self.project.co.get('schedule') or {}).get('mode')=='source_processes':
+            return self._run_source_processes()
+        if (self.project.co.get('schedule') or {}).get('mode') in ('concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric'):
             return self._run_fabric()
         self.events.emit('generate','start',source=str(self.project.source_file))
         try:
@@ -426,12 +429,21 @@ class BuildSession:
             self.issues.add('PHYSICAL.COMBINATIONAL','WARNING','CONFIG','physical',
                             'The top is combinational. Explicit IO input/output timing constraints may be needed for meaningful timing validation.',
                             remedy='Provide target-specific input/output delays and a suitable timing setup.')
+        preflight=physical_preflight(config, self.dls.requires_clock(), check_tools=(backend!='wsl'))
+        atomic_write(self.out/'physical_preflight.json',json.dumps(preflight.as_dict(),indent=2))
+        self.result.files['physical_preflight']=str(self.out/'physical_preflight.json')
+        self._done('physical_preflight',preflight.status,checks=preflight.checks)
+        if preflight.status=='BLOCKED':
+            failed={k:v for k,v in preflight.checks.items() if v['status'] in ('FAIL','BLOCKED')}
+            i=self.issues.add('PHYSICAL.PREFLIGHT_BLOCKED','ERROR','CONFIG','physical',
+                'Physical preflight failed: '+', '.join(failed),
+                cause='Invalid/absent technology or physical configuration.',
+                remedy='Run `picads physical-preflight PROJECT` and correct the reported settings.',
+                evidence=failed)
+            self._done('physical','FAIL',issue_id=i.issue_id);self._block('signoff',i);return
         period=config.get('clock_period_ns')
-        if period is not None and (type(period) not in (float,int) or period<=0):
-            i=self.issues.add('PHYSICAL.CLOCK_PERIOD','ERROR','CONFIG','physical',
-                'clock_period_ns must be a positive number.',remedy='Set a positive clock period in nanoseconds.')
-            self._done('physical','FAIL',issue_id=i.issue_id);return
-        write_librelane_config(name, 'clk' if self.dls.requires_clock() else None, period,self.out/'config.json')
+        write_librelane_config(name, 'clk' if self.dls.requires_clock() else None,period,
+                               self.out/'config.json',extra=preflight.librelane_config)
         # Explicit fresh run tag, preventing an earlier mask from being
         # mistaken for the result of this compilation.
         tag='cc_'+self.result.run_id
@@ -439,13 +451,25 @@ class BuildSession:
             i=self.issues.add('PHYSICAL.RUN_COLLISION','ERROR','FILESYSTEM','physical',
                 f'Unique LibreLane run directory {tag} already exists.',remedy='Select another build directory.')
             self._done('physical','FAIL',issue_id=i.issue_id);return
-        cmd=['librelane']+(['--dockerized'] if config.get('dockerized',False) else [])+[
-            '--pdk',str(config['pdk']),'--run-tag',tag,'config.json']
+        from .dependencies import resolve_tool
+        manifest=make_physical_handoff(rtl,self.out/'config.json',self.out/'physical_handoff.json',
+                                       pdk=str(config['pdk']),run_tag=tag,
+                                       tool_path=resolve_tool('librelane') if backend!='wsl' else 'wsl')
+        self.result.files['physical_handoff']=str(self.out/'physical_handoff.json')
+        cmd=['librelane']+(['--dockerized'] if config.get('dockerized',False) else [])
+        if config.get('pdk_root'):cmd.extend(['--pdk-root',str(Path(config['pdk_root']).expanduser().resolve())])
+        cmd += ['--pdk',str(config['pdk']),'--run-tag',tag,'config.json']
         result=run_external(cmd,self.out,self.out,self.issues,self.events,'physical',timeout=int(config.get('timeout_s',3600)),**opts)
+        if not verify_handoff_inputs(manifest):
+            i=self.issues.add('PHYSICAL.INPUTS_CHANGED','ERROR','FILESYSTEM','physical',
+                'RTL or LibreLane config changed after the run started; resulting layout is untrustworthy.',
+                remedy='Prevent external modification of build/latest and rerun from a clean build.',
+                evidence=manifest)
+            self._done('physical','FAIL',issue_id=i.issue_id);self._block('signoff',i);return
         if result['status']!='PASS':
             self._done('physical',result['status'],**{k:v for k,v in result.items() if k!='status'})
             self._block('signoff',result.get('issue_id'));return
-        evidence=inspect_librelane(self.out/'runs'/tag)
+        evidence=inspect_librelane(self.out/'runs'/tag,expected_top=name)
         atomic_write(self.out/'physical_evidence.json',json.dumps(evidence.as_dict(),indent=2))
         self.result.files['physical_evidence']=str(self.out/'physical_evidence.json')
         if evidence.gds:self.result.files['gds']=evidence.gds[0]
@@ -470,6 +494,77 @@ class BuildSession:
             remedy='Qualify every required DRC/LVS/timing/corner/antenna/power check and mask preparation with your PDK.')
         self._done('signoff','UNAVAILABLE',reason='Foundry-qualified independent signoff not established')
 
+    def _run_source_processes(self):
+        """Compile separate source-defined transactional FSMs that run concurrently.
+
+        No cross-module operator sharing or automatic interprocess communication
+        is claimed. Per-child equivalence and combined DLS state are checked.
+        """
+        from .processes import compile_source_processes,check_source_processes
+        from .global_sharing import compile_global_source_processes,check_global_source_processes
+        sched=self.project.co.get('schedule') or {}
+        global_types=sched.get('global_shared_types') or []
+        global_enabled=bool(global_types or sched.get('global_shared_memory'))
+        builder=compile_global_source_processes if global_enabled else compile_source_processes
+        checker=check_global_source_processes if global_enabled else check_source_processes
+        try:
+            self.dls=builder(self.project.source,
+                  self.project.mcd.get('concurrent_clients'),self.project.co,
+                  self.project.top,self.issues)
+            path=self.out/(self.dls.name+'.dls');self.dls.save(path)
+            self.result.files['dls']=str(path)
+            self._done('generate','PASS',stats=self.dls.stats(),
+                       clients=len(self.dls.metadata['schedule']['source_bindings']),
+                       global_shared_units=self.dls.metadata['schedule'].get('shared_physical_units',{}))
+            if global_enabled:
+                path=self.out/'global_schedule.json'
+                atomic_write(path,json.dumps(self.dls.metadata['schedule'],indent=2,sort_keys=True))
+                self.result.files['global_schedule']=str(path)
+                self._done('scheduling','PASS',mode='global_source_processes',
+                      physical_shared_units=self.dls.metadata['schedule']['shared_physical_units'],
+                      arbitration='independent round-robin per operator')
+        except DiagnosticException as exc:
+            self._done('generate','FAIL',issue_id=exc.issue.issue_id)
+            self._block('equivalence',exc.issue);self._block('export',exc.issue);return
+        except (ValueError,TypeError,SyntaxError) as exc:
+            issue=self.issues.add('MCD.PROCESS_GENERATION','ERROR','MCD','generate',str(exc))
+            self._done('generate','FAIL',issue_id=issue.issue_id)
+            self._block('equivalence',issue);self._block('export',issue);return
+        evidence=(checker(self.project.source,self.dls,self.issues,rounds=14)
+                  if global_enabled else checker(self.project.source,self.dls,self.issues,random_vectors=14))
+        atomic_write(self.out/'process_verification.json',json.dumps(evidence,indent=2,sort_keys=True))
+        self.result.files['process_verification']=str(self.out/'process_verification.json')
+        if evidence['status']!='PASS':
+            issue=self.issues.add('VERIFY.PROCESS_EQUIVALENCE','ERROR','VERIFIER','equivalence',
+                'Parallel process DLS failed sampled source or state-isolation verification.',
+                evidence=evidence,remedy='Inspect process_verification.json; do not export this design.')
+            self._done('equivalence','FAIL',issue_id=issue.issue_id)
+            self._block('export',issue);return
+        memory_shared=self.dls.metadata['schedule'].get('global_shared_memory',False)
+        self._done('equivalence','PASS_PROTOCOL_AND_ISOLATED_SAMPLED' if memory_shared else 'PASS_SAMPLED',
+                   clients=len(self.dls.metadata['schedule']['source_bindings']),
+                   verification=(evidence.get('verification') if memory_shared else
+                                 'Independent sampled source scoreboard with shared contention' if global_enabled
+                                 else 'Sampled source equivalence plus directed concurrent-state check'),
+                   concurrent_atomic_source_equivalence=('NOT_PROVEN' if memory_shared else 'NOT_APPLICABLE'))
+        try:
+            rtl=self.out/(self.dls.name+'.v');export_verilog(self.dls,rtl)
+            self.result.files['verilog']=str(rtl)
+            self._done('export','PASS',path=str(rtl))
+        except Exception as exc:
+            issue=self.issues.add('EXPORT.VERILOG','ERROR','DLS','export',str(exc))
+            self._done('export','FAIL',issue_id=issue.issue_id);return
+        if (self.project.config.get('verification') or {}).get('external_rtl',False):
+            from .rtl_check import check_rtl
+            opts=self.project.config.get('tools') or {}
+            result=check_rtl(self.dls,rtl,self.out,self.issues,self.events,
+                run_options={'runner':opts.get('execution','native'),
+                             'wsl_distribution':opts.get('wsl_distribution')},
+                vector_count=(self.project.config.get('verification') or {}).get('rtl_vectors',128))
+            self._done('rtl_check',result['status'],**{k:v for k,v in result.items() if k!='status'})
+            if result['status']!='PASS':return
+        if self.mode!='compile':return self._run_native_flow(rtl)
+
     def _run_fabric(self):
         """Compile a reusable multi-client controller, not a behavioral source function.
 
@@ -477,10 +572,26 @@ class BuildSession:
         regression provides the actual verification evidence instead.
         """
         from .concurrent import concurrent_fabric,FabricConfig
+        from .tagged import tagged_fabric,TaggedFabricConfig
+        from .tagged_verify import check_tagged_protocol,randomized_tagged_check
         from .fabric_verify import check_fabric_protocol,randomized_fabric_check
+        from .memory_verify import check_external_memory
+        mode=(self.project.co.get('schedule') or {}).get('mode')
         try:
-            spec=FabricConfig(**(self.project.co.get('fabric') or {}))
-            self.dls=concurrent_fabric(spec,self.project.top)
+            if mode=='concurrent_fabric':
+                spec=FabricConfig(**(self.project.co.get('fabric') or {}))
+                self.dls=concurrent_fabric(spec,self.project.top)
+            else:
+                spec=TaggedFabricConfig(**(self.project.co.get('fabric') or {}))
+                if mode=='axi_lite_fabric':
+                    from .axi_lite import axi_tagged_fabric
+                    self.dls=axi_tagged_fabric(spec,self.project.top)
+                elif mode=='bound_fabric':
+                    from .source_binding import bound_source_fabric
+                    self.dls=bound_source_fabric(self.project.source,self.project.mcd.get('concurrent_clients'),
+                                                 spec,self.project.top)
+                else:
+                    self.dls=tagged_fabric(spec,self.project.top)
             dls_path=self.out/(self.dls.name+'.dls')
             self.dls.save(dls_path)
             self.result.files['dls']=str(dls_path)
@@ -495,13 +606,26 @@ class BuildSession:
         self._done('equivalence','NOT_APPLICABLE',
                    reason='This design is an MCD/CO hardware service primitive, not a compiled source function.')
         self.issues.add('VERIFY.FABRIC_NO_SOURCE_EQUIVALENCE','WARNING','VERIFIER','equivalence',
-                        'Concurrent fabric has a fixed interface and no source function reference to prove equivalence against.',
+                        'A resource service fabric is not source-equivalence proven; bound functions have restricted, validated operations only.',
                         remedy='Use protocol test evidence, an independent RTL simulator and formal properties before fabrication.')
-        evidence=check_fabric_protocol(self.dls,spec)
+        if mode=='axi_lite_fabric':
+            from .axi_verify import check_axi_lite_protocol
+            evidence=check_axi_lite_protocol(self.dls,tagged=True)
+        elif spec.memory_backend=='external':
+            evidence=check_external_memory(self.dls,tagged=mode!='concurrent_fabric')
+        else:
+            evidence=(check_fabric_protocol(self.dls,spec) if mode=='concurrent_fabric' else
+                      check_tagged_protocol(self.dls,spec) if mode=='tagged_fabric' else
+                      {'status':'PASS','checks':0,'scenarios':['type-checked MCD source bindings']})
         scoreboards=[]
         if evidence['status']=='PASS':
-            for seed in (8291,29471,19013):
-                row=randomized_fabric_check(self.dls,spec,cycles=160,seed=seed)
+            for seed in (() if spec.memory_backend=='external' and mode=='concurrent_fabric' else (8291,29471,19013)):
+                if mode=='axi_lite_fabric':
+                    from .axi_verify import randomized_axi_lite_check
+                    row=randomized_axi_lite_check(self.dls,tagged=True,seed=seed)
+                else:
+                    row=(randomized_fabric_check(self.dls,spec,cycles=160,seed=seed) if mode=='concurrent_fabric'
+                         else randomized_tagged_check(self.dls,spec,cycles=130,seed=seed))
                 scoreboards.append(row)
                 if row['status']!='PASS':
                     evidence={'status':'FAIL','scenario':'randomized independent scoreboard',

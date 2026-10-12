@@ -1,0 +1,6 @@
+schedule:
+  mode: source_processes
+  global_shared_memory: true
+memory:
+  depth: 4
+  data_width: 8

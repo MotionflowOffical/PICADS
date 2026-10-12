@@ -1,0 +1,146 @@
+[
+  {
+    "example": "axi_lite_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.18
+  },
+  {
+    "example": "bounded_loop_scheduler",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.97
+  },
+  {
+    "example": "c_arithmetic",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.73
+  },
+  {
+    "example": "clocked_hierarchy",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.69
+  },
+  {
+    "example": "concurrent_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.36
+  },
+  {
+    "example": "conditional_alu",
+    "passed": true,
+    "status": "SUCCESS",
+    "seconds": 0.68
+  },
+  {
+    "example": "conditional_scheduler",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.76
+  },
+  {
+    "example": "counter",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.68
+  },
+  {
+    "example": "explicit_network",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.72
+  },
+  {
+    "example": "external_memory_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.43
+  },
+  {
+    "example": "global_shared_processes",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.86
+  },
+  {
+    "example": "hierarchical_modules",
+    "passed": true,
+    "status": "SUCCESS",
+    "seconds": 1.07
+  },
+  {
+    "example": "mcd_bound_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.33
+  },
+  {
+    "example": "mcd_conditional_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.31
+  },
+  {
+    "example": "nested_named_modules",
+    "passed": true,
+    "status": "SUCCESS",
+    "seconds": 0.75
+  },
+  {
+    "example": "pipelined_arithmetic",
+    "passed": true,
+    "status": "SUCCESS",
+    "seconds": 0.88
+  },
+  {
+    "example": "resource_sharing",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.81
+  },
+  {
+    "example": "source_processes",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.82
+  },
+  {
+    "example": "tagged_fabric",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.63
+  },
+  {
+    "example": "time_shared_alu",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.86
+  },
+  {
+    "example": "tmp_generated",
+    "passed": true,
+    "status": "SUCCESS",
+    "seconds": 0.94
+  },
+  {
+    "example": "transactional_c",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 1.54
+  },
+  {
+    "example": "transactional_controller",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.93
+  },
+  {
+    "example": "transactional_memory",
+    "passed": true,
+    "status": "SUCCESS_WITH_WARNINGS",
+    "seconds": 0.91
+  }
+]

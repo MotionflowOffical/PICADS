@@ -1,0 +1,9 @@
+name: PICADSAutoOperators
+top: PICADSAutoOperators
+mcd: design.mcd
+source: processes.py
+co: architecture.co
+verification:
+  external_rtl: false
+physical:
+  enabled: false

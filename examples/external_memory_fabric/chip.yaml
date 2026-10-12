@@ -1,0 +1,9 @@
+name: ExternalMemoryFabric
+mcd: design.mcd
+source: descriptor.py
+co: architecture.co
+verification:
+  external_rtl: false
+  rtl_vectors: 128
+physical:
+  enabled: false

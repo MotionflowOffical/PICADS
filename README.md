@@ -1,83 +1,68 @@
-# Chip Compiler v0.8.0 — Procedural Digital Hardware Suite
+# PICADS v0.16.0
 
-> A cumulative development release, not a qualified manufacturing flow.
+**Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
 
-New in v0.8: **concurrent multi-client service scheduling** with independent shared ALU and on-chip memory arbitration, variable external operator response latency, and automatic one-command Windows verification. See [Concurrent Fabric](docs/CONCURRENT_FABRIC_v0.8.0.md) and [Full System Validation](docs/FULL_VALIDATION_v0.8.0.md). Previous v0.7 features include **transactional CO scheduling** (branch-dependent execution, on-chip memory operations, stalls, per-resource ready backpressure, clocked reset), a reusable **round-robin DLS arbiter**, source-to-DLS execution traces, and explicit scheduled RTL testbench generation. The compiler constructs real primitive gate networks and one-hot FSM registers, not behavioral stubs. See [Transactional Scheduler Guide](docs/TRANSACTIONAL_SCHEDULER_v0.7.0.md), [Implementation Status](docs/IMPLEMENTATION_STATUS.md) and [Remaining Work](docs/NEXT_IMPLEMENTATION.md).
+## v0.16.0 — Windows-first native dependency installation
 
-All previous cumulative functionality and example projects are preserved. General concurrent high-level synthesis of arbitrary source programs, native EDA runtime validation here, qualified physical masks and manufacturing signoff remain *unfinished*.
+PICADS now has **Settings → Install / Manage Windows Tools...**. You can check the optional packages you want (none are selected by default) and download their upstream **Windows** portable archives into `PICADS/dependencies/`. The installer identifies supported tools, saves paths to the PICADS per-user registry, records SHA-256 hashes, and keeps the GUI responsive while downloading. Managed installation status is checked separately from tools discovered on PATH, and incomplete installs are never silently overwritten. The original manual **Choose App** and **Choose Folder** controls remain available.
 
+The supported direct downloads are **OSS CAD Suite for Windows x64** (Yosys, Icarus, Verilator, and available formal tools) and the official Windows ZIP of **KLayout**. No Linux runtime is needed for PICADS compilation, DLS simulation, or these native RTL tools. **LibreLane is not supplied as a fake Windows executable**: for full ASIC place-and-route it currently requires an optional WSL2/Docker backend and a working PDK. KiCad is for PCB design, not an ASIC mask flow.
 
-A procedural digital-logic compiler with executable gate-level DLS, editable MCD/CO descriptions, behavioral verification, structural Verilog export, a dark PySide6 desktop application, and adapters for existing physical-design software.
+[Read the Windows installation and verification guide](docs/WINDOWS_NATIVE_DEPENDENCIES_v0.16.0.md). Native package download and actual Windows process execution still require live testing on Windows; local installer behavior was verified using offline release-shaped archives and security tests.
 
-**Not complete or fabrication-qualified.** The implemented source language and scheduling are deliberately restricted. The physical EDA flow and desktop GUI could not be runtime-executed in the release environment; reported successes only cover the actually executed tests. Consult [Implementation Status](docs/IMPLEMENTATION_STATUS.md) before relying on an output.
+## Original v1.0 scope and qualification target
 
-## What's in this release
+This update prioritizes an **end-to-end, evidence-backed first-chip workflow** rather than adding more optional protocols. A new [future features roadmap](docs/FUTURE_FEATURES.md) separates post-v1.0 plans from requirements for the first usable release. The exact first-release requirements are defined in [v1.0 acceptance](docs/V1_SCOPE_AND_ACCEPTANCE.md).
 
-- Procedural synthesis of arithmetic and Boolean functions into primitive-gate DLS.
-- Restricted typed-Python and C/C++-compatible source frontends.
-- MCD modules, interfaces, mandatory capabilities, **real typed inter-module networks** and **nested combinational/stateful module hierarchy** with one implicit shared rising-edge clock, and optional hardware naming.
-- CO resource sharing, limited true multi-cycle time-sharing with controller and registers, clocked spatial pipelines and static resource limits. Explicit networks require a spatial schedule until cross-module retiming exists.
-- Conditional pure datapaths, comparisons and bounded unrolled loops in time-share mode.
-- Optional external Icarus RTL-vs-DLS simulation (requires real `iverilog` + `vvp`), clock-enable/synchronous-reset state, and independent source-to-DLS behavioral checks, including per-instance register state; VCD traces with hierarchical registers, structured diagnostics and failure causality. Unsafe conditional/short-circuit state effects are rejected explicitly.
-- Dark desktop editor, graph and hierarchical explorers, simulator, build and backup/recovery workspaces.
-- Yosys and LibreLane process adapters (need tools and a PDK installed separately), and structural GDSII inspection.
-- A **read-only SVG preview of actual GDSII layout geometry**, with explicit clipping/unresolved-reference reporting; **not** mask signoff.
+The cumulative previous release added validated PDK/technology and floorplan preflight, a real LibreLane configuration handoff, hashes of input RTL and config, independent GDS top-cell/stream inspection and output hashes, CLI/GUI physical readiness checks, and a one-command Windows first-chip diagnostic runner.
 
-## Install and run (Windows 10/11)
+**Important:** The software is not yet a manufacturing mask generator or foundry signoff product. Producing GDSII in a verified tool run does **not** mean the design meets a fabrication process's electrical constraints, DRC/LVS/STA/antenna/power requirements or mask acceptance rules. Those require a qualified PDK and independent evidence.
 
-1. Install Python 3.10+; Python 3.12 is recommended.
-2. Extract the source ZIP contents directly into a directory; the ZIP contains no wrapper folder.
-3. Execute `RUN_FULL_VALIDATION.bat` to automatically install the required Python test/GUI packages (explicitly announced), run available native checks, and create one ZIP for diagnosis. Or execute `SETUP_GUI_WINDOWS.bat` to explicitly install optional Python GUI/testing dependencies.
-4. Run `RUN_TESTS.bat`, followed by `RUN_GUI.bat`.
-5. The automatic runner does **not** install Yosys, Icarus, LibreLane or a PDK. For external synthesis, install Yosys; for physical design, install LibreLane/OpenROAD and a supported process design kit. These are **not installed automatically**.
+## v0.15.1 — automatic feature verification and source-only ALU component
 
-Command-line usage (after installing with `python -m pip install -e '.[gui,test]'`):
+The release includes an independently specified **4-bit ALU slice** in [`examples/alu_slice_component`](examples/alu_slice_component/circuit.py) (one piece of a future processor, not a complete chip), with its MCD/CO declarations and no handmade RTL or masks. The compiler's DLS passes a separate 1,024-case truth-table check; errors are injected deliberately to test diagnostics.
 
-```bash
-python -m chipcompiler doctor
-python -m chipcompiler compile examples/conditional_alu
-python -m chipcompiler compile examples/hierarchical_modules
-python -m chipcompiler compile examples/time_shared_alu
-python -m chipcompiler compile examples/conditional_scheduler
-python -m chipcompiler compile examples/bounded_loop_scheduler
-python -m chipcompiler compile examples/clocked_hierarchy
-python -m chipcompiler compile examples/explicit_network
-python -m chipcompiler compile examples/nested_named_modules
-python -m chipcompiler compile examples/pipelined_arithmetic
-python -m chipcompiler compile examples/c_arithmetic
-python -m chipcompiler compile examples/transactional_c
-python -m chipcompiler compile examples/concurrent_fabricontroller
-python -m chipcompiler compile examples/transactional_memory
-python -m chipcompiler compile examples/transactional_c
-python -m chipcompiler compile examples/concurrent_fabric
-python -m chipcompiler simulate examples/time_shared_alu --inputs '{"a":3,"b":4,"c":5}'
-python -m chipcompiler build examples/conditional_alu     # requires actual Yosys
-python -m chipcompiler physical examples/conditional_alu  # needs PDK and LibreLane
-python -m chipcompiler inspect-mask /path/to/real.gds
-python -m chipcompiler render-mask /path/to/real.gds --output preview.svg --max-shapes 20000
-python -m chipcompiler diagnose examples/conditional_alu
+**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.0_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
+
+For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART.md). See [automated acceptance guide](docs/AUTOMATED_V1_VERIFICATION_v0.15.1.md) and [ALU chip-part specification](docs/ALU_SLICE_REFERENCE_v0.15.1.md).
+
+**Status:** v1.0 **candidate for Windows integration testing**, not certified feature-complete or foundry-signoff-ready. Qt and native EDA stages are still untested in this environment.
+
+## Windows quick start
+
+1. Extract this ZIP into a directory (no outer wrapper folder).
+2. Run `SETUP_GUI_WINDOWS.bat` to install Python GUI dependencies if necessary.
+3. Run `RUN_GUI.bat` and use **Settings → External Dependencies → Choose App / Choose Folder** to register Icarus (`iverilog` + `vvp`), Yosys, LibreLane, KLayout and other tools you have.
+4. For the first complete hardware-to-GDS test, run **`RUN_V1_ACCEPTANCE.bat`**. It compiles a bundled synchronous example and attempts real RTL/synthesis/physical checks where the required tools and PDK are available.
+5. Return `validation/PICADS_v0.16.0_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
+
+To select a target other than the default `sky130A`, run:
+
+```bat
+RUN_V1_ACCEPTANCE.bat --pdk my_pdk --pdk-root "C:\path\to\pdk_root" --std-cell-library my_cells
 ```
 
-On Windows CMD, use double-quoted JSON strings with escaped interior quotes instead of the Unix single-quote example.
+`pdk_root` must be the containing PDK root expected by LibreLane, not an arbitrary folder of LEF/Liberty files. For a custom thin-film process, you must supply an actually usable characterized technology and standard-cell library; PICADS does not create qualified electrical models from material names.
 
-The `render-mask` command returns 2 if the preview is incomplete, rather than claiming success. Real mask inspection requires a real GDSII file; DLS alone is not a physical layout.
+## CLI
 
-## Implementation documentation
+```sh
+python -m pip install -e ".[test,gui]"
+picads doctor
+picads compile examples/first_physical_chip
+picads physical-preflight examples/first_physical_chip
+python -m chipcompiler.acceptance --output validation/PICADS_v0.16.0_v1_acceptance
+python -m pytest -q tests/test_iteration14.py
+```
 
-- [Current capability status](docs/IMPLEMENTATION_STATUS.md)
-- [v0.8 concurrent resource scheduler](docs/CONCURRENT_FABRIC_v0.8.0.md)
-- [One-click Windows diagnostics](docs/FULL_VALIDATION_v0.8.0.md)
-- [v0.8 verification evidence](docs/VERIFICATION_REPORT_v0.8.0.md)
-- [v0.7.0 release notes](docs/RELEASE_NOTES_v0.7.0.md)
-- [MCD hierarchical network guide](docs/MCD_NETWORK_v0.6.0.md)
-- [Optional independent RTL check](docs/RTL_CHECK_v0.7.0.md)
-- [CO/MCD scheduling and naming](docs/CO_SCHEDULING_v0.4.0.md)
-- [Diagnostic and error provenance](docs/DIAGNOSTICS.md)
-- [Verification report](docs/VERIFICATION_REPORT_v0.7.0.md)
-- [Next implementation work](docs/NEXT_IMPLEMENTATION.md)
-- [Clocked hierarchy and trace semantics](docs/CLOCKED_HIERARCHY_v0.5.0.md)
-- [Architecture overview](docs/ARCHITECTURE.md)
+`physical-preflight` reports BLOCKED until `physical.enabled: true` and a target PDK are configured. It does not claim a physical run or signoff. `chipcompiler` remains a compatibility command alias.
 
-## Reliability policy
+Existing `RUN_GLOBAL_VALIDATION.bat` and `RUN_FULL_VALIDATION.bat` continue to validate the more complex scheduler and broader integration.
 
-Builds archive earlier `build/latest` results, preserve per-run evidence, and distinguish source/config errors from dependent `BLOCKED` stages. Missing tools, incompatible instructions, unverified PDK requirements and partial GDS views are **never substituted with unreported synthetic success**. Project snapshots are atomic and restoration creates a pre-restore backup.
+## Key documentation
+
+- [Future planned features (deferred)](docs/FUTURE_FEATURES.md)
+- [Fixed v1.0 acceptance contract](docs/V1_SCOPE_AND_ACCEPTANCE.md)
+- [Current implementation status](docs/IMPLEMENTATION_STATUS.md)
+- [Remaining required work](docs/NEXT_IMPLEMENTATION.md)
+- [v0.15.1 release notes](docs/RELEASE_NOTES_v0.15.1.md)

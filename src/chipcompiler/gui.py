@@ -13,15 +13,18 @@ from .ir import DLS
 from .waveform import export_vcd
 from .maskinspect import inspect_gds
 from .maskrender import render_gds_svg
+from .dependencies import TOOLS, tool_status, register_tool, unregister_tool, settings_file, resolve_tool, dependency_environment, auto_detect_all
+from .pdk import pdk_status, register_pdk, clear_pdk
+from .windows_installer import install_selected, install_catalog, dependency_root
 
 try:
-    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression
-    from PySide6.QtGui import QAction,QColor,QFont,QSyntaxHighlighter,QTextCharFormat,QBrush,QPen,QPainter
+    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl
+    from PySide6.QtGui import QAction,QColor,QFont,QSyntaxHighlighter,QTextCharFormat,QBrush,QPen,QPainter,QDesktopServices
     from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QSplitter,QVBoxLayout,QHBoxLayout,
         QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainTextEdit,QDockWidget,QLabel,QPushButton,QLineEdit,
         QGraphicsScene,QGraphicsView,QGraphicsRectItem,QGraphicsTextItem,QGraphicsLineItem,
         QMessageBox,QFileDialog,QComboBox,QToolBar,QInputDialog,QTableWidget,QTableWidgetItem,QHeaderView,
-        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox)
+        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar)
 except ImportError as exc:
     raise ImportError('The GUI requires PySide6. Install with: pip install "chipcompiler[gui]"') from exc
 
@@ -160,10 +163,104 @@ class BuildWorker(QThread):
         try:self.finished_report.emit(BuildSession(self.path,self.mode).run())
         except BaseException as exc:self.finished_report.emit({'gui_worker_error':traceback.format_exc()})
 
+class WindowsInstallWorker(QThread):
+    progress_message = Signal(str)
+    completed = Signal(object)
+    def __init__(self, selected: list[str]):
+        super().__init__()
+        self.selected = selected
+    def run(self):
+        try:
+            result = install_selected(self.selected, progress=self.progress_message.emit)
+        except BaseException as exc:
+            result = {'status':'FAILED', 'error':f'{type(exc).__name__}: {exc}'}
+        self.completed.emit(result)
+
+
+class WindowsInstallerDialog(QDialog):
+    """Actual user-initiated downloader. No hidden installation on GUI startup."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('PICADS — Install Windows Dependencies')
+        self.resize(680,560)
+        self.worker = None
+        self.running = False
+        layout = QVBoxLayout(self)
+        heading = QLabel('Install optional Windows EDA tools')
+        heading.setObjectName('section'); layout.addWidget(heading)
+        explanation = QLabel('Only checked packages will be downloaded. Files are kept in '+
+                             str(dependency_root())+' and registered automatically. '
+                             'PICADS itself does not require any external EDA tools to compile or simulate DLS.')
+        explanation.setWordWrap(True); layout.addWidget(explanation)
+        self.choices = {}
+        for spec in install_catalog():
+            check = QCheckBox(spec['name'])
+            check.setEnabled(spec['can_install'])
+            check.setChecked(False)
+            self.choices[spec['id']] = check
+            layout.addWidget(check)
+            if spec['installed']:
+                status = 'already installed in PICADS/dependencies/'
+            elif spec['managed_path_exists']:
+                status = 'existing managed directory needs inspection; will not overwrite'
+            elif spec['mode'] == 'portable':
+                status = 'downloadable official native Windows archive'
+            else:
+                status = 'optional external integration; no native portable archive'
+            purpose = QLabel('  '+spec['purpose']+' — '+status)
+            purpose.setWordWrap(True);purpose.setStyleSheet('color:#a9bcc7')
+            layout.addWidget(purpose)
+            if spec['mode'] != 'portable':
+                guide = QPushButton('Open official setup information for '+spec['id'])
+                guide.clicked.connect(lambda checked=False, url=spec['source']:
+                                      QDesktopServices.openUrl(QUrl(url)))
+                layout.addWidget(guide)
+        self.log = QPlainTextEdit();self.log.setReadOnly(True);layout.addWidget(self.log,1)
+        self.progress = QProgressBar();self.progress.setRange(0,1);self.progress.setValue(0)
+        layout.addWidget(self.progress)
+        bar = QHBoxLayout()
+        self.install_button = QPushButton('Install Selected')
+        self.install_button.clicked.connect(self.begin_install)
+        bar.addWidget(self.install_button)
+        close = QPushButton('Close');close.clicked.connect(self.reject)
+        bar.addWidget(close);layout.addLayout(bar)
+        self.log.appendPlainText('LibreLane full ASIC flow is an optional backend: its supported Windows setup uses WSL2/Docker. No Linux requirement for PICADS editing, compilation, or native RTL tests.')
+    def begin_install(self):
+        selected = [name for name,box in self.choices.items() if box.isChecked()]
+        if not selected:
+            QMessageBox.information(self,'No packages selected','Check at least one native Windows package to install.')
+            return
+        self.running = True
+        self.install_button.setEnabled(False)
+        for box in self.choices.values():box.setEnabled(False)
+        self.progress.setRange(0,0)
+        self.log.appendPlainText('Starting explicit installation: '+', '.join(selected))
+        self.worker = WindowsInstallWorker(selected)
+        self.worker.progress_message.connect(self.log.appendPlainText)
+        self.worker.completed.connect(self.finished_install)
+        self.worker.start()
+    def finished_install(self, result):
+        self.running = False;self.progress.setRange(0,1);self.progress.setValue(1)
+        self.log.appendPlainText(json.dumps(result,indent=2))
+        self.install_button.setEnabled(True)
+        if result.get('status')!='PASS':
+            QMessageBox.warning(self,'Some packages not installed','Installation was incomplete. Review logs and retry or register an installed app manually.')
+        parent = self.parent()
+        if parent and hasattr(parent,'refresh_dependencies'):parent.refresh_dependencies()
+    def reject(self):
+        if self.running:
+            QMessageBox.information(self,'Installation in progress','An installation is still running. Closing is disabled to protect the download and registry.')
+            return
+        super().reject()
+    def closeEvent(self,event):
+        if self.running:event.ignore()
+        else:super().closeEvent(event)
+
+
 class Window(QMainWindow):
     def __init__(self,root:Path):
         super().__init__()
-        self.root=root.resolve();self.setWindowTitle('Chip Compiler — Procedural Chip Design Suite')
+        self.root=root.resolve();self.setWindowTitle('PICADS — Procedural Integrated Circuit Architecture and Design System')
         self.resize(1560,940);self.setStyleSheet(STYLE)
         self.dls=None;self.last_report=None;self.worker=None
         self.sim_vectors=[];self.sim_outputs=[]
@@ -306,28 +403,58 @@ class Window(QMainWindow):
             if snap['excluded']:
                 self.logview.appendPlainText(f'[WARNING] Snapshot excluded {len(snap["excluded"])} items: {snap["excluded"]}')
         except Exception as exc:self.logview.appendPlainText(f'[WARNING] Autosave failed: {exc}')
+    def _switch_project(self,path:Path):
+        """Isolate editor buffers and simulation state across project switches."""
+        if self.worker and self.worker.isRunning():
+            QMessageBox.warning(self,'Build running','Finish the current build before changing projects.')
+            return
+        destination=Path(path).resolve()
+        if destination==self.root:return
+        self.save_all()
+        old=self.root
+        while self.editors.count():
+            editor=self.editors.widget(0)
+            self.editors.removeTab(0)
+            editor.deleteLater()
+        (old/'.chipcompiler'/'dirty_session.flag').unlink(missing_ok=True)
+        self.root=destination
+        self.dls=None;self.last_report=None;self.worker=None
+        self.graph.show_dls(None);self._fill_inspector()
+        self.reset_sim()
+        self.stage_list.clear();self.artifacts.clear();self.problem_tree.clear()
+        self.populate_tree();self.refresh_history()
+        marker=destination/'.chipcompiler'/'dirty_session.flag'
+        marker.parent.mkdir(parents=True,exist_ok=True)
+        atomic_write(marker,datetime.datetime.now(datetime.timezone.utc).isoformat())
+        self.statusBar().showMessage('Project opened: '+str(destination))
     def select_project(self):
-        path=QFileDialog.getExistingDirectory(self,'Open Chip Compiler project',str(self.root))
-        if path:
-            self.save_all();self.root=Path(path).resolve();self.dls=None;self.graph.show_dls(None)
-            self.populate_tree();self.refresh_history()
+        path=QFileDialog.getExistingDirectory(self,'Open PICADS project',str(self.root))
+        if path:self._switch_project(Path(path))
     def new_project(self):
         path=QFileDialog.getExistingDirectory(self,'Choose new project folder',str(self.root.parent))
         if path:
             from .cli import init_project
-            init_project(Path(path));self.root=Path(path).resolve();self.populate_tree();self.graph.show_dls(None)
+            init_project(Path(path));self._switch_project(Path(path))
     def build(self,mode):
         if self.worker and self.worker.isRunning():
             QMessageBox.warning(self,'Build running','Existing build must finish before starting a new one.');return
         self.save_all()
-        self.problem_tree.clear();self.logview.appendPlainText(f'--- {mode.upper()} started, source files saved ---')
+        # An old successful DLS must never remain simulatable while a new
+        # (possibly faulty) source is being compiled.
+        self.dls=None;self.last_report=None
+        self.graph.show_dls(None);self.reset_sim()
+        self.problem_tree.clear();self.stage_list.clear();self.artifacts.clear()
+        self.logview.appendPlainText(f'--- {mode.upper()} started, source files saved ---')
         self.worker=BuildWorker(self.root,mode)
         self.worker.finished_report.connect(self.build_finished)
         self.worker.start();self.statusBar().showMessage('Running '+mode+'…')
         self.tabs.setCurrentIndex(4)
     def build_finished(self,report):
         if isinstance(report,dict):
-            self.logview.appendPlainText(report.get('gui_worker_error',str(report)));return
+            self.dls=None;self.last_report=None
+            self.logview.appendPlainText(report.get('gui_worker_error',str(report)))
+            self.statusBar().showMessage('Build failed internally — see Build log.')
+            return
         self.last_report=report
         self.statusBar().showMessage(f'Build {report.status}; run ID {report.run_id}. See Problems for cause IDs.')
         self.problem_tree.clear()
@@ -511,11 +638,11 @@ class Window(QMainWindow):
 
     def _fabric_page(self):
         widget=QWidget();layout=QVBoxLayout(widget)
-        title=QLabel('Concurrent Resource Fabric — live execution state')
+        title=QLabel('Concurrent Fabric and Global Source Scheduling — live DLS state')
         title.setObjectName('section');layout.addWidget(title)
-        layout.addWidget(QLabel('Actual DLS simulation signals. Each client holds at most one outstanding request; arbitration and memory are separate ports.'))
+        layout.addWidget(QLabel('Actual DLS simulation signals. Shared source mode shows grants and memory-port contention; all timings are logical.'))
         self.fabric_grid=QTableWidget(0,8)
-        self.fabric_grid.setHorizontalHeaderLabels(['Client','Ready','Pending','Active','Response valid','Data','Fault','Register snapshot'])
+        self.fabric_grid.setHorizontalHeaderLabels(['Client','Ready','Pending/slots','Active/tag','Response valid','Data','Fault','Register snapshot'])
         layout.addWidget(self.fabric_grid,2)
         self.fabric_protocol_report=QPlainTextEdit();self.fabric_protocol_report.setReadOnly(True)
         self.fabric_protocol_report.setPlainText('Generate a concurrent_fabric CO design to see resource protocol evidence.')
@@ -531,17 +658,50 @@ class Window(QMainWindow):
     def _fill_fabric_state(self):
         if not hasattr(self,'fabric_grid'):return
         self.fabric_grid.setRowCount(0)
-        if not self.dls or (self.dls.metadata.get('schedule') or {}).get('mode')!='concurrent_fabric':
-            self.fabric_protocol_report.setPlainText('This is not a concurrent_fabric design. Generate the included concurrent_fabric example to inspect its live controller.')
+        mode=((self.dls.metadata.get('schedule') or {}).get('mode') if self.dls else '')
+        if mode=='global_source_processes':
+            schedule=self.dls.metadata['schedule']
+            signals=self.simstate.last_outputs if self.simstate else {}
+            registers=self.simstate.register_snapshot() if self.simstate else {}
+            self.fabric_grid.setHorizontalHeaderLabels([
+                'Process','Ready','Resource requests','Granted resources','Done',
+                'Result','Fault','Controller registers'])
+            for i,client in enumerate(schedule['source_bindings']):
+                name=client['client']
+                resources=list(schedule.get('shared_physical_units',{}))
+                req={kind:signals.get(f'arb_request_{kind.lower()}_{name}')
+                     for kind in resources if f'arb_request_{kind.lower()}_{name}' in signals}
+                grants={kind:signals.get(f'arb_grant_{kind.lower()}_{name}')
+                        for kind in resources if f'arb_grant_{kind.lower()}_{name}' in signals}
+                state={k:v for k,v in registers.items() if '/r_p_'+name+'__' in k}
+                self.fabric_grid.insertRow(i)
+                values=[name,signals.get(name+'_ready'),req,grants,signals.get(name+'_done'),
+                        signals.get(name+'_result'),signals.get(name+'_fault'),state]
+                for column,value in enumerate(values):
+                    self.fabric_grid.setItem(i,column,QTableWidgetItem(str(value)))
+            status={'schedule':schedule,'verification':'NOT_YET_RUN'}
+            for filename in ('global_schedule.json','process_verification.json'):
+                p=self.root/'build'/'latest'/filename
+                if p.is_file():
+                    try:status[filename]=json.loads(p.read_text(encoding='utf-8'))
+                    except (OSError,ValueError) as exc:status[filename]={'error':str(exc)}
+            self.fabric_protocol_report.setPlainText(json.dumps(status,indent=2)[:50000])
+            return
+        self.fabric_grid.setHorizontalHeaderLabels([
+            'Client','Ready','Pending/slots','Active/tag','Response valid','Data','Fault','Register snapshot'])
+        if mode not in ('concurrent_fabric','tagged_fabric','bound_fabric'):
+            self.fabric_protocol_report.setPlainText('Compile a concurrent_fabric, tagged_fabric, or bound_fabric project to inspect its live controller.')
             return
         count=self.dls.metadata['schedule']['clients']
         signals=self.simstate.last_outputs if self.simstate else {}
         regs=self.simstate.register_snapshot() if self.simstate else {}
         for i in range(count):
             self.fabric_grid.insertRow(i)
-            rdata={name:value for name,value in regs.items() if name.endswith('_'+str(i)) or name.endswith('_'+str(i)+'[0]')}
-            values=[str(i),signals.get(f'request_ready_{i}'),signals.get(f'pending_{i}'),
-                    signals.get(f'active_{i}'),signals.get(f'response_valid_{i}'),
+            rdata={name:value for name,value in regs.items() if name.endswith('_'+str(i)) or name.endswith('_'+str(i)+'[0]') or
+                   (mode!='concurrent_fabric' and (('/occupied_'+str(i)+'_') in name or ('/tag_'+str(i)+'_') in name or ('/locked_'+str(i)+'_') in name))}
+            pending=(signals.get(f'pending_{i}') if mode=='concurrent_fabric' else signals.get(f'outstanding_{i}'))
+            active=(signals.get(f'active_{i}') if mode=='concurrent_fabric' else signals.get(f'response_tag_{i}'))
+            values=[str(i),signals.get(f'request_ready_{i}'),pending,active,signals.get(f'response_valid_{i}'),
                     signals.get(f'response_data_{i}'),signals.get(f'response_fault_{i}'),rdata]
             for col,value in enumerate(values):
                 self.fabric_grid.setItem(i,col,QTableWidgetItem(str(value)))
@@ -556,7 +716,7 @@ class Window(QMainWindow):
         title=QLabel('Physical Layout / Mask Data');title.setObjectName('section');v.addWidget(title)
         v.addWidget(QLabel('Real masks are only available after a successful physical EDA run with a valid PDK. No synthetic mask is displayed.'))
         buttons=QHBoxLayout()
-        for text,fn in [('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),('Open GDS/OASIS in KLayout',self.open_mask),('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree)]:
+        for text,fn in [('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),('Open GDS/OASIS in KLayout',self.open_mask),('Check Physical Prerequisites',self.preflight_physical),('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree)]:
             b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
         v.addLayout(buttons)
         self.physical_message=QPlainTextEdit();self.physical_message.setReadOnly(True)
@@ -565,6 +725,25 @@ class Window(QMainWindow):
         self.physical_layout=v
         self.mask_svg_widget=None
         return w
+    def preflight_physical(self):
+        """Run a real logical compile and report target readiness without layout."""
+        from .physical_flow import physical_preflight
+        try:
+            session=BuildSession(self.root,mode='compile')
+            report=session.run()
+            if session.dls is None:
+                message={'status':'BLOCKED','reason':'Compilation failed before physical preflight',
+                         'issues':report.issues}
+            else:
+                preflight=physical_preflight(session.project.config.get('physical') or {},
+                                             session.dls.requires_clock())
+                message=preflight.as_dict()
+                message['compile_status']=report.status
+            self.physical_message.setPlainText(json.dumps(message,indent=2,default=str))
+            self.tabs.setCurrentIndex(3)
+        except Exception as exc:
+            QMessageBox.critical(self,'Physical preflight failed',f'{type(exc).__name__}: {exc}')
+
     def render_mask(self):
         file,_=QFileDialog.getOpenFileName(self,'Render actual GDSII geometry',str(self.root/'build'),'GDSII (*.gds *.gdsii)')
         if not file:return
@@ -602,10 +781,10 @@ class Window(QMainWindow):
     def open_mask(self):
         file,_=QFileDialog.getOpenFileName(self,'Open physical layout',str(self.root/'build'), 'Chip layout (*.gds *.gdsii *.oas *.oasis);;All files (*)')
         if not file:return
-        path=shutil.which('klayout')
+        path=resolve_tool('klayout')
         if not path:
-            QMessageBox.warning(self,'Missing KLayout','KLayout is not on PATH. The layout viewer was not launched.\nInstall KLayout or open this file manually.');return
-        try:subprocess.Popen([path,file])
+            QMessageBox.warning(self,'Missing KLayout','KLayout was not found. Open Settings → External dependencies and choose its application or installation folder.');return
+        try:subprocess.Popen([path,file],env=dependency_environment())
         except OSError as exc:QMessageBox.critical(self,'KLayout launch failed',str(exc))
 
     def _build_page(self):
@@ -626,7 +805,7 @@ class Window(QMainWindow):
 
     def _settings_page(self):
         w=QWidget();v=QVBoxLayout(w)
-        heading=QLabel('Project Settings / Autosave & Backups');heading.setObjectName('section');v.addWidget(heading)
+        heading=QLabel('Settings — External Dependencies / Autosave & Backups');heading.setObjectName('section');v.addWidget(heading)
         note=QLabel('Only editor changes are autosaved. Generated build artifacts remain in build/latest and build/history.');v.addWidget(note)
         form=QFormLayout()
         self.autosave_enabled=QCheckBox('Enable automatic saves and recovery snapshots')
@@ -638,7 +817,52 @@ class Window(QMainWindow):
         v.addLayout(form)
         self.settings_message=QLabel('Settings are local to this project. A failed save is reported.')
         v.addWidget(self.settings_message)
-        v.addStretch(1)
+        v.addWidget(QLabel('External Dependencies — saved for this computer, shared by all PICADS projects'))
+        info=QLabel('Select a specific executable (Choose App) or its installation directory (Choose Folder). '
+                    'A registered path overrides PATH. Use Install Windows Tools to download selected portable packages into dependencies/; no Linux setup is needed for the native compiler/simulator.')
+        info.setWordWrap(True);v.addWidget(info)
+        self.dependency_table=QTableWidget(len(TOOLS),5)
+        self.dependency_table.setHorizontalHeaderLabels(['Dependency','Status / Location','Choose App','Choose Folder','Clear'])
+        self.dependency_table.setColumnWidth(0,105)
+        self.dependency_table.setColumnWidth(1,460)
+        self.dependency_table.setColumnWidth(2,115)
+        self.dependency_table.setColumnWidth(3,125)
+        self.dependency_table.setColumnWidth(4,75)
+        self.dependency_table.verticalHeader().setDefaultSectionSize(37)
+        self.dependency_table.setMinimumHeight(280)
+        self.dependency_rows={}
+        for row,tool in enumerate(TOOLS):
+            self.dependency_rows[tool]=row
+            name=QTableWidgetItem(tool);name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.dependency_table.setItem(row,0,name)
+            for col,label,kind in ((2,'Choose App','app'),(3,'Choose Folder','folder')):
+                button=QPushButton(label)
+                button.clicked.connect(lambda checked=False,t=tool,k=kind:self.choose_dependency(t,k))
+                self.dependency_table.setCellWidget(row,col,button)
+            clear=QPushButton('Clear');clear.clicked.connect(lambda checked=False,t=tool:self.clear_dependency(t))
+            self.dependency_table.setCellWidget(row,4,clear)
+        v.addWidget(self.dependency_table,1)
+        toolrow=QHBoxLayout()
+        refresh=QPushButton('Refresh tool status');refresh.clicked.connect(self.refresh_dependencies);toolrow.addWidget(refresh)
+        auto=QPushButton('Auto Detect Installed Tools');auto.clicked.connect(self.auto_detect_dependencies);toolrow.addWidget(auto)
+        registry=QLabel(str(settings_file()));registry.setWordWrap(True);toolrow.addWidget(registry,1)
+        v.addLayout(toolrow)
+        installrow=QHBoxLayout()
+        download=QPushButton('Install / Manage Windows Tools...')
+        download.clicked.connect(self.open_windows_installer)
+        installrow.addWidget(download)
+        origin=QLabel('Native Windows packages only · Opt-in downloads · Local dependencies/ folder')
+        origin.setWordWrap(True);installrow.addWidget(origin,1)
+        v.addLayout(installrow)
+        pdkrow=QHBoxLayout()
+        self.pdk_label=QLabel('Custom PDK: not configured');self.pdk_label.setWordWrap(True)
+        pdkrow.addWidget(self.pdk_label,1)
+        choosepdk=QPushButton('Choose PDK Folder');choosepdk.clicked.connect(self.choose_pdk);pdkrow.addWidget(choosepdk)
+        clearpdk=QPushButton('Clear PDK');clearpdk.clicked.connect(self.clear_pdk_setting);pdkrow.addWidget(clearpdk)
+        v.addLayout(pdkrow)
+        self.dependency_message=QLabel('KiCad supports PCB design; it is not a replacement for an IC PDK or foundry signoff.')
+        self.dependency_message.setWordWrap(True);v.addWidget(self.dependency_message)
+        self.refresh_dependencies();self.refresh_pdk()
         try:
             path=self.root/'.chipcompiler'/'settings.json'
             values=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
@@ -652,6 +876,80 @@ class Window(QMainWindow):
         self.autosave_interval.valueChanged.connect(self.update_autosave_settings)
         self.keep_versions.valueChanged.connect(self.update_autosave_settings)
         return w
+    def open_windows_installer(self):
+        dialog = WindowsInstallerDialog(self)
+        dialog.exec()
+        self.refresh_dependencies()
+
+    def auto_detect_dependencies(self):
+        try:
+            results=auto_detect_all()
+            detected=[k for k,v in results.items() if v['auto_detect_action']=='FOUND_IN_INSTALLATION']
+            preserved=[k for k,v in results.items() if v['auto_detect_action']=='PRESERVED_MANUAL_SELECTION']
+            self.refresh_dependencies()
+            self.dependency_message.setText(
+                f'Auto-detected {len(detected)} installation(s): {", ".join(detected) or "none"}. '
+                f'Existing manual selections preserved: {len(preserved)}.')
+        except Exception as exc:
+            QMessageBox.warning(self,'Automatic tool detection failed',str(exc))
+
+    def refresh_dependencies(self):
+        for tool,row in self.dependency_rows.items():
+            try:
+                state=tool_status(tool)
+                if state['available']:
+                    text=f"AVAILABLE [{state['source']}] {state['path']}"
+                else:
+                    text=f"UNAVAILABLE [{state['source']}] {state['error']}"
+                item=QTableWidgetItem(text)
+                item.setToolTip((state.get('selection') or '')+'\n'+(state.get('error') or ''))
+                item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.dependency_table.setItem(row,1,item)
+            except Exception as exc:
+                self.dependency_table.setItem(row,1,QTableWidgetItem(f'CONFIG ERROR: {exc}'))
+
+    def choose_dependency(self,tool,kind):
+        if kind=='folder':
+            path=QFileDialog.getExistingDirectory(self,f'Choose {tool} installation folder',str(Path.home()))
+        else:
+            path,_=QFileDialog.getOpenFileName(self,f'Choose {tool} executable',str(Path.home()),
+                'Applications (*.exe *.cmd *.bat *.com);;All files (*)')
+        if not path:return
+        try:
+            state=register_tool(tool,path,kind)
+            self.dependency_message.setText(f"Registered {tool}: {state['path']}")
+            self.refresh_dependencies()
+        except Exception as exc:
+            self.dependency_message.setText(f'ERROR registering {tool}: {exc}')
+            QMessageBox.warning(self,'Dependency registration failed',str(exc))
+
+    def clear_dependency(self,tool):
+        try:
+            state=unregister_tool(tool)
+            self.dependency_message.setText(f"Cleared {tool}; {'PATH executable available' if state['available'] else 'tool unavailable'}.")
+            self.refresh_dependencies()
+        except Exception as exc:
+            QMessageBox.critical(self,'Dependency settings error',str(exc))
+
+    def refresh_pdk(self):
+        try:
+            status=pdk_status()
+            self.pdk_label.setText(f"Custom PDK [{status['status']}] {status.get('path') or 'none'} — {status.get('reason','')}")
+        except Exception as exc:self.pdk_label.setText(f'PDK settings error: {exc}')
+
+    def choose_pdk(self):
+        path=QFileDialog.getExistingDirectory(self,'Select custom PDK technology root',str(Path.home()))
+        if not path:return
+        try:
+            status=register_pdk(path)
+            self.refresh_pdk()
+            self.dependency_message.setText(f"PDK inventory: {status['status']}. Inventory is not manufacturing certification.")
+        except Exception as exc:QMessageBox.warning(self,'PDK registration failed',str(exc))
+
+    def clear_pdk_setting(self):
+        try:clear_pdk();self.refresh_pdk()
+        except Exception as exc:QMessageBox.warning(self,'PDK settings error',str(exc))
+
     def apply_autosave_settings(self):
         if self.autosave_enabled.isChecked():
             self.autosave.start(self.autosave_interval.value()*1000)
@@ -750,6 +1048,6 @@ class Window(QMainWindow):
 
 def launch(root:Path)->int:
     app=QApplication.instance() or QApplication([])
-    app.setApplicationName('Chip Compiler')
+    app.setApplicationName('PICADS')
     win=Window(Path(root));win.show()
     return app.exec()

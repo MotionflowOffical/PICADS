@@ -1,0 +1,5 @@
+schedule:
+  mode: source_processes
+  global_shared_types: [ADD, MUL]
+  latencies:
+    MUL: 2

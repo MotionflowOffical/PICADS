@@ -1,0 +1,9 @@
+schedule:
+  mode: bound_fabric
+fabric:
+  clients: 2
+  slots_per_client: 2
+  tag_width: 4
+  width: 4
+  depth: 4
+  operator: builtin

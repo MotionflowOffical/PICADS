@@ -6,3 +6,7 @@ __pycache__/
 build/
 .chipcompiler/
 dist/
+
+# Native EDA binaries are downloaded separately; never include in source releases.
+dependencies/*
+!dependencies/README.md

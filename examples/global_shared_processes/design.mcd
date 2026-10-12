@@ -1,0 +1,9 @@
+top: PICADSGlobalSharedProcesses
+description: Independently executing source FSMs with one global ADD and one global MUL gate-level datapath.
+concurrent_clients:
+  - name: lane0
+    function: choose
+  - name: lane1
+    function: accumulate
+  - name: lane2
+    function: choose

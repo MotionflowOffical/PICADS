@@ -1,0 +1,14 @@
+name: PICADSFirstChip
+source: circuit.py
+mcd: design.mcd
+co: architecture.co
+# Configure a real LibreLane standard-cell PDK before invoking physical.
+# This example intentionally defaults to false: no fake layout without tools.
+physical:
+  enabled: false
+  pdk: sky130A
+  clock_period_ns: 20
+  core_utilization: 35
+  timeout_s: 5400
+verification:
+  external_rtl: false

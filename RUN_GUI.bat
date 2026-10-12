@@ -15,6 +15,6 @@ if errorlevel 1 (
   pause
   exit /b 2
 )
-%PY% -m chipcompiler gui "%~dp0examples\conditional_alu"
+%PY% -m chipcompiler gui "%~dp0examples\alu_slice_component"
 if errorlevel 1 pause
 endlocal

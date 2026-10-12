@@ -5,6 +5,8 @@ from pathlib import Path
 from . import __version__
 from .pipeline import BuildSession
 from .tools import probe
+from .dependencies import register_tool, unregister_tool, tool_status, probe_tools, settings_file, auto_detect_all
+from .pdk import inspect_pdk, register_pdk, clear_pdk, pdk_status
 from .project import snapshot,restore
 from .ir import DLS
 
@@ -26,10 +28,10 @@ def init_project(path:Path):
     return {'created':str(root),'unchanged_existing_files':existed}
 
 def main(argv=None)->int:
-    ap=argparse.ArgumentParser(prog='chipcompiler',description='Procedural digital chip compiler')
+    ap=argparse.ArgumentParser(prog='picads',description='PICADS procedural integrated circuit design and automation')
     ap.add_argument('--version',action='version',version=__version__)
     commands=ap.add_subparsers(dest='command',required=True)
-    for c in ('compile','build','physical','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask'):
+    for c in ('compile','build','physical','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight'):
         sp=commands.add_parser(c)
         if c not in ('doctor',):sp.add_argument('project',nargs='?',default='.')
         if c=='restore':sp.add_argument('archive');sp.add_argument('--confirm',action='store_true')
@@ -45,11 +47,46 @@ def main(argv=None)->int:
             sp.add_argument('--output',help='SVG output path; default is next to input GDS file')
             sp.add_argument('--top',help='Specify GDS top cell, required if ambiguous')
             sp.add_argument('--max-shapes',type=int,default=20000)
+    dep=commands.add_parser('dependencies',help='List/register/clear external EDA applications and installation folders')
+    dep.add_argument('operation',choices=('list','set','clear','auto','catalog','install'),nargs='?',default='list')
+    dep.add_argument('tool',nargs='?')
+    dep.add_argument('path',nargs='?')
+    dep.add_argument('--folder',action='store_true',help='Register installation directory instead of executable')
+    pdk=commands.add_parser('pdk',help='Read-only PDK inventory and selected technology folder')
+    pdk.add_argument('operation',choices=('status','inspect','set','clear'),nargs='?',default='status')
+    pdk.add_argument('path',nargs='?')
     ns=ap.parse_args(argv)
     try:
-        if ns.command=='doctor':
-            result={'python':sys.version.split()[0],'tools':probe(),'pyside6':bool(__import__('importlib').util.find_spec('PySide6')),
-                    'status':'External tools are optional for compile, required for build/physical'}
+        if ns.command=='pdk':
+            if ns.operation=='inspect':
+                if not ns.path:raise ValueError('Usage: picads pdk inspect FOLDER')
+                result=inspect_pdk(ns.path)
+            elif ns.operation=='set':
+                if not ns.path:raise ValueError('Usage: picads pdk set FOLDER')
+                result=register_pdk(ns.path)
+            elif ns.operation=='clear':result=clear_pdk()
+            else:result=pdk_status()
+        elif ns.command=='dependencies':
+            if ns.operation=='list':result={'registry':str(settings_file()),'tools':probe_tools()}
+            elif ns.operation=='catalog':
+                from .windows_installer import install_catalog, dependency_root
+                result={'install_root':str(dependency_root()),'packages':install_catalog()}
+            elif ns.operation=='install':
+                if not ns.tool:raise ValueError('Usage: picads dependencies install oss-cad-suite|klayout')
+                from .windows_installer import install_selected
+                result=install_selected(ns.tool.split(','),progress=lambda line:print(line,file=sys.stderr,flush=True))
+            elif ns.operation=='auto':result={'registry':str(settings_file()),'tools':auto_detect_all()}
+            elif ns.operation=='set':
+                if not ns.tool or not ns.path:raise ValueError('Usage: picads dependencies set TOOL PATH [--folder]')
+                result={'tool':ns.tool,'status':register_tool(ns.tool,ns.path,'folder' if ns.folder else 'app')}
+            else:
+                if not ns.tool:raise ValueError('Usage: picads dependencies clear TOOL')
+                result={'tool':ns.tool,'status':unregister_tool(ns.tool)}
+        elif ns.command=='doctor':
+            result={'python':sys.version.split()[0],'tools':probe(),'pdk':pdk_status(),'pyside6':bool(__import__('importlib').util.find_spec('PySide6')),
+                    'status':'External tools are optional for compile; native tools enable RTL tests; ASIC physical backend remains optional and separately configured',
+                    'windows_native_installable':['oss-cad-suite','klayout'],
+                    'full_asic_backend':'LibreLane via optional WSL2/Docker (not native Windows)'}
         elif ns.command=='init':result=init_project(Path(ns.project))
         elif ns.command=='backup':result=snapshot(Path(ns.project),ns.label)
         elif ns.command=='restore':result=restore(Path(ns.project),Path(ns.archive),ns.confirm)
@@ -67,6 +104,24 @@ def main(argv=None)->int:
         elif ns.command=='gui':
             from .gui import launch
             return launch(Path(ns.project))
+        elif ns.command=='physical-preflight':
+            from .physical_flow import physical_preflight
+            compile_result=BuildSession(Path(ns.project),mode='compile')
+            result_compile=compile_result.run()
+            if not compile_result.dls:
+                result={'status':'BLOCKED','reason':'Logical compiler failed; no reliable RTL to implement',
+                        'compile':result_compile.as_dict()}
+            else:
+                physical_config=compile_result.project.config.get('physical') or {}
+                preflight=physical_preflight(physical_config,compile_result.dls.requires_clock())
+                from .project import atomic_write
+                destination=compile_result.out/'physical_preflight.json'
+                atomic_write(destination,json.dumps(preflight.as_dict(),indent=2))
+                result={'status':preflight.status,'report':str(destination),
+                        'compile_status':result_compile.status,'checks':preflight.checks,'notes':preflight.notes,
+                        'librelane_config':preflight.librelane_config}
+            print(json.dumps(result,indent=2,default=str))
+            return 0 if result['status']=='READY_TO_ATTEMPT' else 2
         else:
             session=BuildSession(Path(ns.project),mode='compile' if ns.command in ('simulate','trace') else ns.command)
             outcome=session.run()
@@ -116,7 +171,7 @@ def main(argv=None)->int:
             print(json.dumps(result,indent=2,default=str))
             return 1 if result['status']=='FAILED' else 2 if result['status']=='INCOMPLETE' else 0
         print(json.dumps(result,indent=2,default=str))
-        return 2 if ns.command=='render-mask' and result.get('status')=='PARTIAL' else 0
+        return 2 if ((ns.command=='render-mask' and result.get('status')=='PARTIAL') or (ns.command=='dependencies' and ns.operation=='install' and result.get('status')!='PASS')) else 0
     except Exception as e:
         print(json.dumps({'status':'ERROR','origin':'CLI','type':type(e).__name__,'message':str(e)},indent=2),file=sys.stderr)
         return 1

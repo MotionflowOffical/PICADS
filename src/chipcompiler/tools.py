@@ -4,33 +4,37 @@ import subprocess,shutil,os,json,time,threading,collections,re
 from pathlib import Path
 from .diagnostics import IssueCollector,EventLog
 from .project import atomic_write
+from .dependencies import resolve_tool, probe_tools, TOOLS, dependency_environment, tool_status, DependencyConfigurationError
 
 def probe()->dict[str,dict]:
-    return {name:{'available':bool(shutil.which(name)),'path':shutil.which(name)}
-            for name in ('yosys','iverilog','vvp','librelane','klayout','openroad','magic','netgen','wsl.exe','gcc','g++')}
+    return probe_tools()
 
 def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:EventLog,
                  stage:str,timeout:int=600,runner:str='native',wsl_distribution:str|None=None)->dict:
     assert argv
     requested=list(argv)
     if runner=='wsl':
-        executable=shutil.which('wsl.exe') or shutil.which('wsl')
+        executable=resolve_tool('wsl.exe')
         if executable:
             argv=[executable]+(['--distribution',wsl_distribution] if wsl_distribution else [])+[
                 '--cd',str(Path(cwd).resolve()),'--exec',*argv]
         else:argv=['wsl.exe',*argv]
     elif runner=='native':
-        executable=shutil.which(argv[0])
+        executable=resolve_tool(argv[0]) if argv[0] in TOOLS else shutil.which(argv[0])
+        if executable:
+            argv=[executable,*argv[1:]]
     else:
         i=issues.add('TOOL.RUNNER_INVALID','ERROR','CONFIG',stage,
             f'Unknown external execution backend {runner!r}.',remedy='Use native or wsl runner.')
         return {'status':'FAIL','issue_id':i.issue_id}
     if not executable:
+        selected=tool_status(requested[0]) if runner=='native' and requested[0] in TOOLS else None
+        selected_info=(f" Registered location: {selected['selection']}. {selected['error']}" if selected and selected['source']=='registered' else '')
         issue=issues.add('TOOL.MISSING','ERROR','DEPENDENCY',stage,
-                         f'Required external tool runner for {requested[0]!r} is unavailable ({runner}).',
+                         f'Required external tool runner for {requested[0]!r} is unavailable ({runner}).{selected_info}',
                          cause='EDA dependency or WSL executable is missing from the selected execution environment.',
-                         remedy='Install the tool in the selected environment, or set tools.execution appropriately; run doctor.',
-                         evidence={'argv':argv,'runner':runner,'requested':requested,'PATH':os.environ.get('PATH','')})
+                         remedy='Open Settings > External Dependencies; choose the correct App/Folder or clear the invalid selection. For WSL, configure tools.execution and WSL separately.',
+                         evidence={'argv':argv,'runner':runner,'requested':requested,'PATH':os.environ.get('PATH',''),'registered_selection':selected})
         events.emit(stage,'missing_dependency',issue_id=issue.issue_id,executable=argv[0])
         return {'status':'UNAVAILABLE','argv':argv,'issue_id':issue.issue_id}
     started=time.monotonic()
@@ -45,7 +49,8 @@ def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:
             log.write(f'$ {" ".join(argv)}\n\n--- LIVE TOOL OUTPUT ---\n')
             log.flush()
             proc=subprocess.Popen(argv,cwd=cwd,stdout=subprocess.PIPE,stderr=subprocess.PIPE,
-                                  text=True,encoding='utf-8',errors='replace',bufsize=1)
+                                  text=True,encoding='utf-8',errors='replace',bufsize=1,
+                                  env=dependency_environment() if runner=='native' else None)
             def consume(stream,label,tail):
                 try:
                     for line in stream:
@@ -91,6 +96,12 @@ def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:
             result['issue_id']=i.issue_id
         events.emit(stage,'finish',**result)
         return result
+    except DependencyConfigurationError as e:
+        i=issues.add('TOOL.ENVIRONMENT_INVALID','ERROR','DEPENDENCY',stage,str(e),
+                     cause='The selected portable Windows EDA bundle could not activate its required child-process environment.',
+                     remedy='Open Settings and check the registered installation, environment.bat and bundled files; reinstall the affected optional package if necessary.')
+        events.emit(stage,'environment_invalid',issue_id=i.issue_id)
+        return {'status':'UNAVAILABLE','issue_id':i.issue_id}
     except OSError as e:
         i=issues.add('TOOL.LAUNCH_FAILED','ERROR','TOOL',stage,str(e),
                      cause='OS was unable to launch the external executable.',
@@ -98,9 +109,21 @@ def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:
         events.emit(stage,'launch_failed',issue_id=i.issue_id)
         return {'status':'FAIL','issue_id':i.issue_id}
 
-def write_librelane_config(design_name:str,clock_port:str|None,clock_period:float|None,path:Path):
+def write_librelane_config(design_name:str,clock_port:str|None,clock_period:float|None,path:Path,
+                           extra:dict|None=None):
+    """Write a real LibreLane 2 JSON config using one generated Verilog file.
+
+    Additional constraints must already be validated by physical_flow; fail if
+    they try to override the top module or selected RTL file.
+    """
     config={'DESIGN_NAME':design_name,'VERILOG_FILES':['dir::'+design_name+'.v']}
     if clock_port and clock_period:
         config['CLOCK_PORT']=clock_port;config['CLOCK_PERIOD']=clock_period
+    if extra:
+        if not isinstance(extra,dict):raise ValueError('LibreLane extra settings must be a mapping')
+        immutable={'DESIGN_NAME','VERILOG_FILES'}
+        if set(extra) & immutable:
+            raise ValueError('LibreLane extras cannot override RTL identity')
+        config.update(extra)
     atomic_write(path,json.dumps(config,indent=2))
     return config

@@ -1,0 +1,12 @@
+name: PICADS_ALU_Slice_Test
+source: circuit.py
+mcd: design.mcd
+co: architecture.co
+verification:
+  external_rtl: false
+  rtl_vectors: 128
+physical:
+  enabled: false
+  pdk: sky130A
+  clock_period_ns: 20
+  core_utilization: 35

@@ -1,0 +1,3 @@
+top: ExternalMemoryFabric
+description: Multi-outstanding tagged resource fabric with independent operator and memory arbitration
+modules: []

@@ -1,0 +1,4 @@
+architecture:
+  adder: ripple
+schedule:
+  mode: spatial

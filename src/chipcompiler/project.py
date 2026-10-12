@@ -4,7 +4,7 @@ import os, json, tempfile, hashlib, shutil, zipfile, time, uuid, datetime, ast
 from pathlib import Path
 from dataclasses import dataclass
 import yaml
-from .diagnostics import IssueCollector
+from .diagnostics import IssueCollector, DiagnosticException
 
 PROJECT_FILE='chip.yaml'
 
@@ -123,15 +123,34 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
         issues.add('CO.SCHEDULE_TYPE','ERROR','CO','load','schedule must be a mapping.',file=co_path)
     else:
         for field in scheduling:
-            if field not in ('pipeline_stages','mode','latencies','ready_types'):
+            if field not in ('pipeline_stages','mode','latencies','ready_types','global_shared_types','global_shared_memory'):
                 issues.add('CO.SCHEDULE_UNKNOWN','ERROR','CO','load',f'Unsupported schedule directive {field!r}; not applied.',file=co_path)
-        if scheduling.get('mode','spatial') not in ('spatial','time_share','transactional','concurrent_fabric'):
+        if scheduling.get('mode','spatial') not in ('spatial','time_share','transactional','concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric','source_processes'):
             issues.add('CO.SCHEDULE_MODE','ERROR','CO','load',
-                       'schedule.mode must be spatial, time_share, transactional or concurrent_fabric.',file=co_path)
+                       'schedule.mode must be spatial, time_share, transactional, concurrent_fabric, tagged_fabric, bound_fabric or axi_lite_fabric or source_processes.',file=co_path)
+        shared_mem=scheduling.get('global_shared_memory',False)
+        if type(shared_mem)!=bool:
+            issues.add('CO.GLOBAL_MEMORY_SETTING','ERROR','CO','load',
+                       'schedule.global_shared_memory must be true or false.',file=co_path)
+        if shared_mem and scheduling.get('mode')!='source_processes':
+            issues.add('CO.GLOBAL_MEMORY_MODE','ERROR','CO','load',
+                       'Shared memory is available only in source_processes mode.',file=co_path)
+        if shared_mem and not isinstance(co.get('memory'),dict):
+            issues.add('CO.GLOBAL_MEMORY_SPEC','ERROR','CO','load',
+                       'Shared memory requires a memory.depth and memory.data_width declaration.',file=co_path)
+        global_types=scheduling.get('global_shared_types',[])
+        if global_types:
+            if scheduling.get('mode')!='source_processes':
+                issues.add('CO.GLOBAL_SHARE_MODE','ERROR','CO','load',
+                           'schedule.global_shared_types is supported only in source_processes mode.',file=co_path)
+            from .shared_operators import SHARED_BINARY_OPS
+            if global_types != 'auto' and (not isinstance(global_types,list) or len(set(map(str,global_types)))!=len(global_types) or any(x not in SHARED_BINARY_OPS for x in global_types)):
+                issues.add('CO.GLOBAL_SHARE_TYPES','ERROR','CO','load',
+                           'global_shared_types must be auto or a list of unique supported binary operators.',file=co_path)
         count=scheduling.get('pipeline_stages',0)
-        if scheduling.get('mode') in ('time_share','transactional','concurrent_fabric') and count:
+        if scheduling.get('mode') in ('time_share','transactional','concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric','source_processes') and count:
             issues.add('CO.SCHEDULE_CONFLICT','ERROR','CO','load',
-                       'Time-shared/transactional modes do not accept pipeline_stages.',file=co_path,
+                       'Time-shared/transactional/fabric modes do not accept pipeline_stages.',file=co_path,
                        remedy='Use schedule.mode: time_share without pipeline_stages, or spatial pipelining.')
         if type(count)!=int or not 0<=count<=32:
             issues.add('CO.PIPELINE_STAGES','ERROR','CO','load',
@@ -156,7 +175,7 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                        'modules.naming: mcd requires modules.hierarchy: preserve.',file=co_path,
                        remedy='Enable hierarchy preservation to expose named module instances.')
     if isinstance(modules_config,dict) and isinstance(scheduling,dict):
-        if modules_config.get('hierarchy')=='preserve' and (scheduling.get('pipeline_stages',0) or scheduling.get('mode') in ('time_share','transactional','concurrent_fabric')):
+        if modules_config.get('hierarchy')=='preserve' and (scheduling.get('pipeline_stages',0) or scheduling.get('mode') in ('time_share','transactional','concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric','source_processes')):
             issues.add('CO.SCHEDULE_HIERARCHY','ERROR','CO','load',
                        'Automatic logic pipelining with preserved module instances is not yet supported.',file=co_path,
                        cause='The stage allocator does not retime across hierarchical module boundaries.',
@@ -165,9 +184,9 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
     if not isinstance(memory,dict):
         issues.add('CO.MEMORY_FORMAT','ERROR','CO','load','memory must be a mapping.',file=co_path)
     elif memory:
-        if scheduling.get('mode')!='transactional':
+        if scheduling.get('mode') not in ('transactional','source_processes'):
             issues.add('CO.MEMORY_MODE','ERROR','CO','load',
-                       'Explicit memory settings require schedule.mode: transactional.',file=co_path)
+                       'Explicit memory settings require schedule.mode: transactional or source_processes.',file=co_path)
         for key in memory:
             if key not in ('depth','data_width'):
                 issues.add('CO.MEMORY_UNKNOWN','ERROR','CO','load',f'Unknown memory setting {key!r}.',file=co_path)
@@ -175,10 +194,10 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
             issues.add('CO.MEMORY_SPEC','ERROR','CO','load',
                        'memory.depth must be 1..32 and data_width must be 1..64.',file=co_path)
     if isinstance(scheduling,dict):
-        if scheduling.get('mode')!='transactional' and (scheduling.get('latencies') or scheduling.get('ready_types')):
+        if scheduling.get('mode') not in ('transactional','source_processes') and (scheduling.get('latencies') or scheduling.get('ready_types')):
             issues.add('CO.SCHEDULE_OPTIONS_MODE','ERROR','CO','load',
-                       'latencies and ready_types are only supported in transactional mode.',file=co_path)
-        if scheduling.get('mode')=='transactional':
+                       'latencies and ready_types are supported only in transactional/source_processes modes.',file=co_path)
+        if scheduling.get('mode') in ('transactional','source_processes'):
             lat=scheduling.get('latencies',{})
             ready=scheduling.get('ready_types',[])
             valid={'ADD','SUB','MUL','AND','OR','XOR','EQ','NE','LT','LE','GT','GE','NOT','INV','NEG','BOOL_AND','BOOL_OR','READ','WRITE','MOVE','RETURN'}
@@ -192,35 +211,76 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                            'Transactional mode currently implements exactly one shared operator of each used type.',
                            file=co_path,remedy='Set each max_instances value to 1 or omit the limits.')
     fabric=co.get('fabric',{})
-    if scheduling.get('mode')=='concurrent_fabric':
+    if scheduling.get('mode') in ('concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric'):
         from .concurrent import FabricConfig
+        from .tagged import TaggedFabricConfig
         if not isinstance(fabric,dict):
             issues.add('CO.FABRIC_FORMAT','ERROR','CO','load',
                        'fabric must be a mapping.',file=co_path)
         else:
             for field in fabric:
-                if field not in ('clients','width','depth','operator'):
+                if field not in (('clients','width','depth','operator','memory_backend') if scheduling.get('mode')=='concurrent_fabric' else ('clients','width','depth','operator','memory_backend','slots_per_client','tag_width')):
                     issues.add('CO.FABRIC_UNKNOWN','ERROR','CO','load',
                                f'Unknown fabric setting {field!r}.',file=co_path)
-            if not set(fabric)-{'clients','width','depth','operator'}:
-                try:FabricConfig(**fabric).validate()
+            if not set(fabric)-({'clients','width','depth','operator','memory_backend'} if scheduling.get('mode')=='concurrent_fabric' else {'clients','width','depth','operator','memory_backend','slots_per_client','tag_width'}):
+                try:
+                    (FabricConfig(**fabric) if scheduling.get('mode')=='concurrent_fabric' else TaggedFabricConfig(**fabric)).validate()
                 except (ValueError,TypeError) as exc:
                     issues.add('CO.FABRIC_CONFIG','ERROR','CO','load',str(exc),file=co_path)
             if allocation.get('max_instances') or allocation.get('sharing') not in (None,'auto'):
                 issues.add('CO.FABRIC_ALLOCATION','ERROR','CO','load',
-                    'concurrent_fabric defines one operator and one memory port; generic allocation directives are not supported.',file=co_path)
+                    'Fabric scheduling defines one operator and one memory port; generic allocation directives are not supported.',file=co_path)
             if modules_config.get('hierarchy','flatten')!='flatten' or modules_config.get('naming','function')!='function':
                 issues.add('CO.FABRIC_HIERARCHY','ERROR','CO','load',
-                    'concurrent_fabric cannot be combined with source module hierarchy settings.',file=co_path)
+                    'Fabric scheduling cannot be combined with source module hierarchy settings.',file=co_path)
             if memory:
                 issues.add('CO.FABRIC_MEMORY','ERROR','CO','load',
-                    'Set fabric.depth and fabric.width, not memory, for concurrent_fabric.',file=co_path)
+                    'Set fabric.depth and fabric.width, not memory, for fabric scheduling.',file=co_path)
             if scheduling.get('latencies') or scheduling.get('ready_types'):
                 issues.add('CO.FABRIC_LATENCY','ERROR','CO','load',
                     'Use the external operator ready/valid protocol, not reservation latency settings.',file=co_path)
     elif fabric:
         issues.add('CO.FABRIC_MODE','ERROR','CO','load',
-                   'fabric settings require schedule.mode: concurrent_fabric.',file=co_path)
+                   'fabric settings require schedule.mode: concurrent_fabric, tagged_fabric, bound_fabric or axi_lite_fabric.',file=co_path)
+    if isinstance(scheduling,dict) and scheduling.get('mode')=='source_processes':
+        from .processes import compile_source_processes
+        from .global_sharing import compile_global_source_processes
+        try:
+            selected_compiler=(compile_global_source_processes if (scheduling.get('global_shared_types') or scheduling.get('global_shared_memory'))
+                               else compile_source_processes)
+            # Compile source bindings once during load to reject unsupported
+            # arbitrary Python rather than silently discarding user processes.
+            selected_compiler(text,mcd.get('concurrent_clients'),co,
+                name=str(mcd.get('top','source_processes')),issues=issues)
+        except DiagnosticException:
+            pass  # The TransactionalCompiler already reported the exact source/CO issue.
+        except (ValueError,TypeError,SyntaxError) as exc:
+            issues.add('MCD.PROCESS_BINDING','ERROR','MCD','load',str(exc),file=config.get('mcd'),
+                remedy='Declare 2..8 named source process functions in MCD.concurrent_clients.')
+    if isinstance(scheduling,dict) and scheduling.get('mode')=='axi_lite_fabric':
+        if isinstance(fabric,dict) and fabric.get('memory_backend')!='external':
+            issues.add('CO.AXI_MEMORY_BACKEND','ERROR','CO','load',
+                       'axi_lite_fabric requires fabric.memory_backend: external.',file=co_path,
+                       remedy='Set fabric.memory_backend: external. AXI4-Lite uses the external memory service channel.')
+    if isinstance(scheduling,dict) and scheduling.get('mode')=='bound_fabric':
+        if isinstance(fabric,dict) and fabric.get('memory_backend')=='external':
+            issues.add('MCD.BOUND_EXTERNAL_MEMORY','ERROR','MCD','load',
+                       'Bound arithmetic-only source clients cannot issue external memory operations; use tagged_fabric.',file=co_path)
+        try:
+            from .tagged import TaggedFabricConfig
+            from .source_binding import infer_bindings
+            infer_bindings(text,mcd.get('concurrent_clients'),TaggedFabricConfig(**(fabric or {})))
+        except (ValueError,TypeError,SyntaxError) as exc:
+            issues.add('MCD.CONCURRENT_BINDING','ERROR','MCD','load',str(exc),file=config.get('mcd'),
+                       remedy='Use two-argument stateless uN functions returning a+b or a*b and list each client in MCD.concurrent_clients.')
+    if isinstance(scheduling,dict) and scheduling.get('mode') in ('concurrent_fabric','tagged_fabric','bound_fabric','axi_lite_fabric','source_processes'):
+        if mcd.get('network') is not None or mcd.get('requires') or mcd.get('modules'):
+            issues.add('MCD.FABRIC_UNUSED_DECLARATION','ERROR','MCD','load',
+                       'Fabric scheduling does not consume MCD.network, MCD.requires or MCD.modules; refusing to silently ignore them.',
+                       file=config.get('mcd'))
+    elif mcd.get('concurrent_clients') is not None:
+        issues.add('MCD.CONCURRENT_MODE','ERROR','MCD','load',
+                   'MCD.concurrent_clients only applies to schedule.mode: bound_fabric or source_processes.',file=config.get('mcd'))
     for field in co:
         if field not in ('architecture','allocation','schedule','modules','memory','fabric'):
             issues.add('CO.UNSUPPORTED_DIRECTIVE','WARNING','CO','load',
@@ -327,7 +387,7 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                     remedy='Specify a valid and unambiguous mandatory source function.')
         # Unsupported declarations are visible, never secretly interpreted as implemented.
         for key in mcd:
-            if key not in ('top','description','modules','source','requires','interface','network'):
+            if key not in ('top','description','modules','source','requires','interface','network','concurrent_clients'):
                 issues.add('MCD.UNKNOWN_KEY','WARNING','MCD','load',f'Unrecognized MCD field {key!r} was not applied.',file=config.get('mcd'))
     return ChipProject(root,config,mcd,co,source_file,text,source_kind,original_text,translation)
 
