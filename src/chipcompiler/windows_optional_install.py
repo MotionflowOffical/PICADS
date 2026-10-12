@@ -216,116 +216,14 @@ try {
 LIBRELANE_SETUP = r'''@echo off
 setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
-set "READY=%~dp0backend_smoke_passed.txt"
-set "DISTRO_FILE=%~dp0wsl_distribution.txt"
-set "PICADS_PYTHON=__PICADS_PYTHON__"
 echo.
-echo PICADS - Optional LibreLane backend setup for Windows
-echo This uses an existing WSL2 Linux distribution when one is installed.
-echo Only if NONE is installed will PICADS request an Ubuntu installation.
-echo Docker Desktop integration, Linux sudo, or a restart may still be required.
-echo.
-echo [1/5] Discovering installed WSL2 distributions...
-where wsl.exe >nul 2>nul
-if errorlevel 1 (
- echo WSL executable is not available. Enable WSL first, then rerun this launcher.
- goto :pending
-)
-if not exist "%PICADS_PYTHON%" (
- echo PICADS Python executable is missing: %PICADS_PYTHON%
- echo Launch LibreLane setup again from PICADS Settings to refresh this path.
- goto :pending
-)
-"%PICADS_PYTHON%" "%~dp0DISCOVER_WSL_DISTRO.py" "%DISTRO_FILE%"
-set "DISCOVERY_RC=%ERRORLEVEL%"
-if "%DISCOVERY_RC%"=="0" goto :distro_found
-if "%DISCOVERY_RC%"=="2" goto :install_ubuntu
-rem Code 3 means Ubuntu/Debian already exists but is not initialized.
-rem Code 4 means WSL discovery itself failed. NEVER try a duplicate install.
-goto :pending
-:install_ubuntu
-echo No installed interactive Linux distribution was found.
-echo Requesting Ubuntu from Microsoft. This may need a restart.
-wsl.exe --install -d Ubuntu
-if errorlevel 1 goto :pending
-echo Launch Ubuntu once to initialize your user account, then rerun this file.
-goto :pending
-:distro_found
-for /f "usebackq delims=" %%G in ("%DISTRO_FILE%") do set "PICADS_DISTRO=%%G"
-if not defined PICADS_DISTRO goto :pending
-echo Reusing WSL distribution: %PICADS_DISTRO%
-wsl.exe --distribution "%PICADS_DISTRO%" --exec sh -c "printf 'PICADS_WSL_READY'"
-if errorlevel 1 goto :pending
-:docker
-echo [2/5] Checking Docker Desktop...
-rem Docker Desktop 4.8x+ offers an official per-user install. WinGet's
-rem machine-wide installer can fail when ProgramData\DockerDesktop has the
-rem wrong owner. PICADS must not change system ACLs or delete Docker data.
-where docker.exe >nul 2>nul
-if not errorlevel 1 goto :dockercheck
-rem The per-user installer does not necessarily update this cmd process PATH.
-if exist "%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin\docker.exe" (
- set "PATH=%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin;%PATH%"
- goto :dockercheck
-)
-if exist "%ProgramFiles%\Docker\Docker\resources\bin\docker.exe" (
- set "PATH=%ProgramFiles%\Docker\Docker\resources\bin;%PATH%"
- goto :dockercheck
-)
-if exist "%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe" goto :docker_installed
-if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" goto :docker_installed
-if not exist "%~dp0INSTALL_DOCKER_PER_USER.ps1" (
- echo Per-user Docker setup helper is missing. Reinstall the PICADS hotfix.
- goto :pending
-)
-echo Docker Desktop is not detected. Starting the official per-user WSL2 installer.
-echo PICADS will not change ownership or delete C:\ProgramData\DockerDesktop.
-where powershell.exe >nul 2>nul
-if errorlevel 1 (
- echo Windows PowerShell is not available to download/verify the official installer.
- goto :pending
-)
-powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0INSTALL_DOCKER_PER_USER.ps1" -InstallRoot "%CD%"
-if errorlevel 1 goto :pending
-:docker_installed
-echo Start Docker Desktop and enable WSL2 integration for %PICADS_DISTRO%.
-echo Then rerun this setup from PICADS. Installation alone does not prove Docker works.
-goto :pending
-:dockercheck
-echo [3/5] Checking Docker daemon and WSL integration...
-docker info >nul 2>nul
-if errorlevel 1 (
- echo Start Docker Desktop, then rerun.
- goto :pending
-)
-wsl.exe --distribution "%PICADS_DISTRO%" --exec bash -lc "docker info >/dev/null 2>&1"
-if errorlevel 1 (
- echo Enable Docker Desktop - Settings - Resources - WSL Integration for %PICADS_DISTRO%.
- goto :pending
-)
-:python
-echo [4/5] Installing LibreLane into a virtual environment in %PICADS_DISTRO%...
-wsl.exe --distribution "%PICADS_DISTRO%" --exec bash -lc "sudo apt-get update && sudo apt-get install -y python3 python3-venv python3-pip python3-tk curl make git build-essential"
-if errorlevel 1 goto :failed
-wsl.exe --distribution "%PICADS_DISTRO%" --exec bash -lc "python3 -m venv $HOME/.local/share/picads-librelane/venv && $HOME/.local/share/picads-librelane/venv/bin/python -m pip install --upgrade pip librelane"
-if errorlevel 1 goto :failed
-echo [5/5] Running LibreLane Docker smoke test...
-wsl.exe --distribution "%PICADS_DISTRO%" --exec bash -lc "sudo ln -sfn $HOME/.local/share/picads-librelane/venv/bin/librelane /usr/local/bin/librelane"
-if errorlevel 1 goto :failed
-wsl.exe --distribution "%PICADS_DISTRO%" --exec bash -lc "command -v librelane && librelane --dockerized --smoke-test"
-if errorlevel 1 goto :failed
-echo LIBRELANE_SMOKE_TEST_PASS>"%READY%"
-echo LibreLane smoke test PASSED in WSL distribution %PICADS_DISTRO%.
-echo Set tools.execution: wsl and tools.wsl_distribution: %PICADS_DISTRO% in PICADS chip.yaml.
-goto :end
-:pending
-echo Setup incomplete. Resolve the message above and rerun this launcher.
-goto :end
-:failed
-echo LibreLane setup failed. Inspect the first error above; no successful smoke test was recorded.
-:end
+echo PICADS - LibreLane setup for Windows ^(existing WSL/Docker first^)
+"__PICADS_PYTHON__" "%~dp0LIBRELANE_SETUP_WINDOWS.py"
+set "PICADS_EXIT=%ERRORLEVEL%"
+if not "%PICADS_EXIT%"=="0" echo LibreLane backend setup is not complete ^(code %PICADS_EXIT%^).
 echo.
 pause
+exit /b %PICADS_EXIT%
 '''
 
 # The console bootstrap uses the venv's Python explicitly. Installing a
@@ -337,9 +235,17 @@ def stage_librelane(root: Path, progress: Callable[[str], None], *, launch=True,
     folder = root / 'librelane'
     folder.mkdir(parents=True, exist_ok=True)
     launcher = folder / 'SETUP_LIBRELANE_WINDOWS.bat'
-    helper = folder / 'DISCOVER_WSL_DISTRO.py'
-    helper.write_text(Path(__file__).with_name('wsl_backend_discovery.py').read_text(encoding='utf-8'),
-                      encoding='utf-8')
+    # The standalone setup imports `wsl_backend_discovery`, so its staged
+    # sibling MUST have that module name.  Older installers also used
+    # DISCOVER_WSL_DISTRO.py as a standalone CLI; keep the alias for backwards
+    # compatibility with existing diagnostic instructions.
+    discovery_text = Path(__file__).with_name('wsl_backend_discovery.py').read_text(encoding='utf-8')
+    helper = folder / 'wsl_backend_discovery.py'
+    helper.write_text(discovery_text, encoding='utf-8')
+    legacy_helper = folder / 'DISCOVER_WSL_DISTRO.py'
+    legacy_helper.write_text(discovery_text, encoding='utf-8')
+    setup_helper = folder / 'LIBRELANE_SETUP_WINDOWS.py'
+    setup_helper.write_text(Path(__file__).with_name('windows_librelane_setup.py').read_text(encoding='utf-8'), encoding='utf-8')
     docker_helper = folder / 'INSTALL_DOCKER_PER_USER.ps1'
     docker_helper.write_text(DOCKER_PER_USER_INSTALL, encoding='utf-8-sig')
     # Use the same Windows interpreter that is currently running PICADS.
@@ -358,7 +264,7 @@ def stage_librelane(root: Path, progress: Callable[[str], None], *, launch=True,
             raise GuidedSetupError('Setup script saved, but could not open the Windows console: ' + str(exc)) from exc
         progress('LibreLane setup console opened. Complete its prompts; the GUI does not wait for or claim success.')
     return {'status': 'SETUP_STARTED' if launch else 'SETUP_REQUIRED',
-            'package': 'librelane', 'directory': str(folder), 'launcher': str(launcher), 'discovery_helper': str(helper), 'docker_installer_helper': str(docker_helper),
+            'package': 'librelane', 'directory': str(folder), 'launcher': str(launcher), 'discovery_helper': str(helper), 'setup_helper': str(setup_helper), 'docker_installer_helper': str(docker_helper),
             'message': 'WSL2, Docker Desktop and Ubuntu initialization may need approval/restart. Rerun the launcher after reboot; smoke-test evidence is required.'}
 
 

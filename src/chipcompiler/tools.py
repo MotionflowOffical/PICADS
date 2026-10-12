@@ -14,11 +14,21 @@ def run_external(argv:list[str],cwd:Path,logs:Path,issues:IssueCollector,events:
     assert argv
     requested=list(argv)
     if runner=='wsl':
-        executable=resolve_tool('wsl.exe')
+        # The Linux executable is NOT a Windows dependency registration.
+        # Always use argv-based WSL invocation and the PICADS-managed venv for
+        # LibreLane; no sudo-installed /usr/local/bin symlink is required.
+        executable=resolve_tool('wsl.exe') or shutil.which('wsl.exe')
         if executable:
-            argv=[executable]+(['--distribution',wsl_distribution] if wsl_distribution else [])+[
-                '--cd',str(Path(cwd).resolve()),'--exec',*argv]
-        else:argv=['wsl.exe',*argv]
+            prefix=[executable]+(['--distribution',wsl_distribution] if wsl_distribution else [])+[
+                '--cd',str(Path(cwd).resolve()),'--exec']
+            if requested[0]=='librelane':
+                argv=prefix+['bash','-lc',
+                    'exec "$HOME/.local/share/picads-librelane/venv/bin/python" -m librelane "$@"',
+                    'picads-librelane',*requested[1:]]
+            else:
+                argv=prefix+requested
+        else:
+            argv=['wsl.exe',*requested]
     elif runner=='native':
         executable=resolve_tool(argv[0]) if argv[0] in TOOLS else shutil.which(argv[0])
         if executable:

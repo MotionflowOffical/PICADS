@@ -48,7 +48,7 @@ def main(argv=None)->int:
             sp.add_argument('--top',help='Specify GDS top cell, required if ambiguous')
             sp.add_argument('--max-shapes',type=int,default=20000)
     dep=commands.add_parser('dependencies',help='List/register/clear external EDA applications and installation folders')
-    dep.add_argument('operation',choices=('list','set','clear','auto','catalog','install','repair'),nargs='?',default='list')
+    dep.add_argument('operation',choices=('list','wsl-status','set','clear','auto','catalog','install','repair'),nargs='?',default='list')
     dep.add_argument('tool',nargs='?')
     dep.add_argument('path',nargs='?')
     dep.add_argument('--folder',action='store_true',help='Register installation directory instead of executable')
@@ -67,7 +67,13 @@ def main(argv=None)->int:
             elif ns.operation=='clear':result=clear_pdk()
             else:result=pdk_status()
         elif ns.command=='dependencies':
-            if ns.operation=='list':result={'registry':str(settings_file()),'tools':probe_tools()}
+            if ns.operation=='list':
+                from .wsl_backend import backend_status
+                result={'registry':str(settings_file()),'tools':probe_tools(),
+                        'librelane_wsl_backend':backend_status()}
+            elif ns.operation=='wsl-status':
+                from .wsl_backend import backend_status
+                result=backend_status(live=True)
             elif ns.operation=='catalog':
                 from .windows_installer import install_catalog, dependency_root
                 result={'install_root':str(dependency_root()),'packages':install_catalog()}
@@ -87,7 +93,8 @@ def main(argv=None)->int:
                 if not ns.tool:raise ValueError('Usage: picads dependencies clear TOOL')
                 result={'tool':ns.tool,'status':unregister_tool(ns.tool)}
         elif ns.command=='doctor':
-            result={'python':sys.version.split()[0],'tools':probe(),'pdk':pdk_status(),'pyside6':bool(__import__('importlib').util.find_spec('PySide6')),
+            from .wsl_backend import backend_status
+            result={'python':sys.version.split()[0],'tools':probe(),'librelane_wsl_backend':backend_status(live=True),'pdk':pdk_status(),'pyside6':bool(__import__('importlib').util.find_spec('PySide6')),
                     'status':'External tools are optional for compile; native tools enable RTL tests; ASIC physical backend remains optional and separately configured',
                     'windows_native_installable':['oss-cad-suite','klayout','kicad (WinGet)'],
                     'full_asic_backend':'LibreLane selectable guided WSL2/Docker setup (not native Windows; smoke test required)'}
@@ -117,7 +124,10 @@ def main(argv=None)->int:
                         'compile':result_compile.as_dict()}
             else:
                 physical_config=compile_result.project.config.get('physical') or {}
-                preflight=physical_preflight(physical_config,compile_result.dls.requires_clock())
+                toolconf=compile_result.project.config.get('tools') or {}
+                preflight=physical_preflight(physical_config,compile_result.dls.requires_clock(),
+                    execution=toolconf.get('execution','native'),
+                    wsl_distribution=toolconf.get('wsl_distribution'))
                 from .project import atomic_write
                 destination=compile_result.out/'physical_preflight.json'
                 atomic_write(destination,json.dumps(preflight.as_dict(),indent=2))

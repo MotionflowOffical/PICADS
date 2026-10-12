@@ -1,18 +1,27 @@
 {
   "product": "PICADS",
-  "version": "0.16.7",
-  "type": "cumulative Windows Docker per-user installer hotfix",
+  "version": "0.16.8",
+  "type": "cumulative WSL LibreLane detection, GUI/preflight/acceptance integration",
   "changes": [
-    "WSL guided setup uses Docker official EXE --user --backend=wsl-2 instead of WinGet machine-wide installation",
-    "Reuses Authenticode-validated previous Docker installers in bounded cache locations",
-    "Finds Docker CLI after per-user installation even before PATH refresh",
-    "No changes to system ACLs, ProgramData ownership, Docker data, or existing WSL distros",
-    "Validates actual Docker daemon and LibreLane smoke test before marking setup complete"
+    "Uses standalone Python for WSL name selection and all subsequent WSL commands",
+    "Detects running Docker engines regardless of stale inherited Windows PATH",
+    "Never invokes Docker installer if Docker Desktop is present but CLI/daemon are not ready",
+    "Separately probes Docker inside Ubuntu; suggests enabling official WSL integration",
+    "Invokes managed LibreLane venv directly for Dockerized physical runs; verifies Yosys in WSL",
+    "Preserves Docker/WSL data; smoke PASS marker only after official LibreLane test",
+    "Repairs standalone LibreLane setup import-path mismatch; generated launcher now imports the correctly staged module with legacy alias support",
+    "Reports WSL LibreLane installed after matching smoke test receipt, separately from native Windows executables",
+    "Read-only live WSL/Yosys/Docker/LibreLane diagnostics and one-click batch launcher",
+    "Physical preflight uses project-selected WSL backend and Linux PDK paths, not native Windows executables",
+    "Acceptance runner can select WSL via --execution auto/native/wsl and propagates execution to temporary reference projects"
   ],
   "verification": {
-    "focused_pytest": "81 passed, 1 skipped (Qt unavailable)",
-    "native_powershell_docker_wsl": "NOT RUN in this environment",
-    "physical_signoff": "NOT VERIFIED"
+    "targeted_pytest": "97 passed, 2 skipped (Linux local + simulated WSL processes)",
+    "full_historical_pytest": "NOT COMPLETED; run interrupted after >200 tests",
+    "native_Windows_GUI_and_PICADS_GDS": "NOT RUN on user machine",
+    "user_librelane_smoke_test": "80/80 passed as logged by user on 2026-10-12",
+    "custom_thin_film_fabrication": "NOT VERIFIED"
   },
-  "external_binaries_included": false
+  "external_binaries_included": false,
+  "revision": "r3"
 }

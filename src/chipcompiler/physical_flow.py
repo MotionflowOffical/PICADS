@@ -84,7 +84,8 @@ def normalize_physical_settings(settings: dict, clocked: bool) -> tuple[dict, di
     return dict(settings), ll
 
 
-def physical_preflight(settings: dict, clocked: bool, *, check_tools: bool = True) -> PhysicalPreflight:
+def physical_preflight(settings: dict, clocked: bool, *, check_tools: bool = True,
+                       execution: str = 'native', wsl_distribution: str | None = None) -> PhysicalPreflight:
     checks: dict[str, dict] = {}
     notes: list[str] = []
     try:
@@ -102,22 +103,54 @@ def physical_preflight(settings: dict, clocked: bool, *, check_tools: bool = Tru
         checks['pdk'] = {'status': 'BLOCKED', 'reason': 'Set physical.pdk to an installed LibreLane PDK name'}
     else:
         checks['pdk'] = {'status': 'PASS', 'selected': pdk}
-    root = physical.get('pdk_root') or os.environ.get('PDK_ROOT')
+    # Windows PDK_ROOT cannot be assumed to exist in the WSL filesystem.
+    root = physical.get('pdk_root') or (os.environ.get('PDK_ROOT') if execution != 'wsl' else None)
     if root:
-        root_path = Path(root).expanduser().resolve()
-        # Some PDK_ROOTs use versions/<hash>/<pdk>; leave that to LibreLane.
-        checks['pdk_root'] = ({'status': 'PASS' if root_path.is_dir() else 'BLOCKED', 'path': str(root_path),
-                               'reason': 'Directory does not exist' if not root_path.is_dir() else None})
-        if root_path.is_dir() and pdk and not (root_path / pdk).is_dir():
-            notes.append('PDK_ROOT does not have a direct PDK subdirectory; version-managed PDK installations may use another layout. LibreLane must resolve it.')
+        if execution == 'wsl':
+            # Linux paths must never be resolved with Windows pathlib. Only a
+            # live WSL filesystem probe can verify an explicitly supplied root.
+            import shutil
+            import subprocess
+            wsl = shutil.which('wsl.exe') or shutil.which('wsl')
+            valid = False
+            if wsl and wsl_distribution:
+                try:
+                    valid = subprocess.run([wsl, '--distribution', wsl_distribution,
+                                            '--exec', 'test', '-d', root],
+                                           capture_output=True, timeout=30).returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            checks['pdk_root'] = {'status': 'PASS' if valid else 'BLOCKED',
+                                  'path': root, 'reason': None if valid else
+                                  'PDK root is not accessible as a Linux directory in selected WSL distribution; specify a Linux path, or omit pdk_root to use LibreLane/Ciel defaults.'}
+        else:
+            root_path = Path(root).expanduser().resolve()
+            # Some PDK_ROOTs use versions/<hash>/<pdk>; leave that to LibreLane.
+            checks['pdk_root'] = ({'status': 'PASS' if root_path.is_dir() else 'BLOCKED', 'path': str(root_path),
+                                   'reason': 'Directory does not exist' if not root_path.is_dir() else None})
+            if root_path.is_dir() and pdk and not (root_path / pdk).is_dir():
+                notes.append('PDK_ROOT does not have a direct PDK subdirectory; version-managed PDK installations may use another layout. LibreLane must resolve it.')
     else:
         checks['pdk_root'] = {'status': 'UNVERIFIED', 'reason': 'LibreLane may resolve its default PDK root; none selected explicitly'}
     if check_tools:
-        from .dependencies import tool_status
-        for name in ('yosys', 'librelane'):
-            status = tool_status(name)
-            checks[name] = {'status': 'PASS' if status['available'] else 'UNAVAILABLE',
-                            'path': status['path'], 'reason': status['error']}
+        if execution == 'wsl':
+            from .wsl_backend import backend_status
+            backend = backend_status(wsl_distribution, live=True)
+            for name in ('yosys', 'librelane'):
+                info = backend.get('checks', {}).get(name, {})
+                checks[name] = {'status': info.get('status', 'UNAVAILABLE'),
+                                'path': f'WSL:{backend.get("distribution") or "not configured"}',
+                                'reason': info.get('detail') or (None if info.get('status') == 'PASS' else backend['detail'])}
+            checks['docker_wsl'] = {'status': backend.get('checks', {}).get('docker', {}).get('status', 'UNAVAILABLE'),
+                                    'reason': backend.get('checks', {}).get('docker', {}).get('detail') or backend['detail']}
+            if not backend['recorded_smoke_pass']:
+                notes.append('No matching recorded LibreLane smoke-test receipt; live executable probes do not constitute a full design flow.')
+        else:
+            from .dependencies import tool_status
+            for name in ('yosys', 'librelane'):
+                status = tool_status(name)
+                checks[name] = {'status': 'PASS' if status['available'] else 'UNAVAILABLE',
+                                'path': status['path'], 'reason': status['error']}
     if not clocked:
         notes.append('Combinational design: clock-based STA alone does not qualify input/output delay constraints')
     if any(v['status'] in ('FAIL', 'BLOCKED') for v in checks.values()):

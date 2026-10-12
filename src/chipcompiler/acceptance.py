@@ -76,14 +76,16 @@ def _preserve_build(report: dict, target: Path, diagnostic_dir: Path, prefix: st
 
 
 def _run_stage(root: Path, mode: str, diagnostics: Path, prefix: str, *,
-               rtl: bool = False, physical: dict | None = None) -> dict:
+               rtl: bool = False, physical: dict | None = None,
+               execution: str = 'native', distro: str | None = None) -> dict:
     project=_copy_project(root)
-    if rtl or physical is not None:
+    if rtl or physical is not None or execution == 'wsl':
         import yaml
         f=project/'chip.yaml'
         data=yaml.safe_load(f.read_text(encoding='utf-8'))
         if rtl:data.setdefault('verification',{})['external_rtl']=True
         if physical is not None:data['physical']=physical
+        if execution == 'wsl':data['tools']={'execution':'wsl','wsl_distribution':distro}
         f.write_text(yaml.safe_dump(data,sort_keys=False),encoding='utf-8')
     outcome=BuildSession(project,mode=mode).run().as_dict()
     return _preserve_build(outcome,project,diagnostics,prefix)
@@ -91,20 +93,31 @@ def _run_stage(root: Path, mode: str, diagnostics: Path, prefix: str, *,
 
 def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None = None,
                    library: str | None = None, gui: bool = True,
-                   physical_timeout: int = 5400) -> dict:
+                   physical_timeout: int = 5400, execution: str = 'auto',
+                   wsl_distribution: str | None = None) -> dict:
     """Returns the diagnostic summary. Partial native coverage is not PASS."""
     if not isinstance(pdk,str) or not pdk.replace('_','').isalnum():
         raise ValueError('PDK name must be a simple identifier')
     if not 60 <= physical_timeout <= 86400:
         raise ValueError('physical_timeout must be between 60 and 86400 seconds')
+    from .wsl_backend import backend_status
+    if execution not in ('native', 'wsl', 'auto'):
+        raise ValueError('execution must be native, wsl or auto')
+    candidate = backend_status(wsl_distribution, live=True) if execution != 'native' else None
+    if execution == 'auto':
+        # Do not confuse a historical marker with today's runtime availability.
+        execution = 'wsl' if candidate and candidate['available'] and candidate['recorded_smoke_pass'] else 'native'
+    distro = candidate['distribution'] if execution == 'wsl' and candidate else None
     out=Path(output).resolve();out.mkdir(parents=True,exist_ok=True)
     rootdir=out/'evidence';rootdir.mkdir(exist_ok=True)
-    summary={'schema':1,'product':'PICADS','version':'0.16.7',
+    summary={'schema':1,'product':'PICADS','version':'0.16.8',
              'timestamp_utc':datetime.now(timezone.utc).isoformat(),
              'target':'bounded first-chip RTL-to-GDS acceptance',
              'statuses':{},'manufacturing_qualified':False,
              'meaning':'Independent foundry signoff is not established by this runner.'}
     stages=summary['statuses']
+    summary['execution']={'backend':execution, 'wsl_distribution':distro,
+                          'wsl_status':candidate if candidate is not None else None}
     tools=probe_tools()
     (rootdir/'dependencies.json').write_text(json.dumps(tools,indent=2),encoding='utf-8')
     with tempfile.TemporaryDirectory(prefix='picads-v1-acceptance-') as temp:
@@ -114,30 +127,40 @@ def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None =
         stages['source_to_dls_and_rtl']={'status':'PASS' if compiled['status'] in ('SUCCESS','SUCCESS_WITH_WARNINGS') and str(eq).startswith('PASS')
                                            and compiled['stages'].get('export',{}).get('status')=='PASS' else 'FAIL',
                                          'equivalence':eq,'evidence':compiled}
-        if all(resolve_tool(name) for name in ('iverilog','vvp')):
-            verified=_run_stage(workspace/'rtl','compile',rootdir,'rtl',rtl=True)
+        if execution == 'wsl':
+            # Native Windows Icarus is not the same installation as WSL Icarus.
+            from .wsl_backend import probe_wsl_commands
+            rtl_ready = probe_wsl_commands(distro, ['iverilog', 'vvp'])
+        else:
+            rtl_ready = {n: bool(resolve_tool(n)) for n in ('iverilog', 'vvp')}
+        if all(rtl_ready.values()):
+            verified=_run_stage(workspace/'rtl','compile',rootdir,'rtl',rtl=True,execution=execution,distro=distro)
             value=verified['stages'].get('rtl_check',{}).get('status')
             stages['native_rtl_equivalence']={'status':'PASS' if value=='PASS' else 'FAIL',
                                               'evidence':verified}
         else:
             stages['native_rtl_equivalence']={'status':'UNAVAILABLE',
-                'missing_tools':[n for n in ('iverilog','vvp') if not resolve_tool(n)],
+                'missing_tools':[n for n in ('iverilog','vvp') if not rtl_ready[n]],
                 'remedy':'Register Icarus iverilog and vvp in Settings.'}
-        if resolve_tool('yosys'):
-            synthesised=_run_stage(workspace/'synthesis','build',rootdir,'synthesis')
+        yosys_ready = (bool(candidate and candidate['checks']['yosys']['status']=='PASS')
+                       if execution=='wsl' else bool(resolve_tool('yosys')))
+        if yosys_ready:
+            synthesised=_run_stage(workspace/'synthesis','build',rootdir,'synthesis',execution=execution,distro=distro)
             stage=synthesised['stages'].get('yosys',{}).get('status')
             stages['native_yosys_synthesis']={'status':'PASS' if stage=='PASS' else 'FAIL',
                                               'evidence':synthesised}
         else:
             stages['native_yosys_synthesis']={'status':'UNAVAILABLE','remedy':'Install/register Yosys in Settings.'}
-        root=selected_pdk_root(pdk,pdk_root)
+        # Default WSL PDK is managed by Ciel inside Ubuntu. A native Windows
+        # selected PDK directory must never be resolved and sent into Linux.
+        root=(pdk_root if execution=='wsl' else selected_pdk_root(pdk,pdk_root))
         physical={'enabled':True,'pdk':pdk,'clock_period_ns':20,
                   'core_utilization':35,'timeout_s':physical_timeout}
         if root:physical['pdk_root']=root
         if library:physical['std_cell_library']=library
-        preflight=physical_preflight(physical,True,check_tools=True)
+        preflight=physical_preflight(physical,True,execution=execution,wsl_distribution=distro)
         stages['physical_preflight']=preflight.as_dict()
-        if not resolve_tool('librelane'):
+        if not (bool(candidate and candidate['checks']['librelane']['status']=='PASS') if execution=='wsl' else bool(resolve_tool('librelane'))):
             stages['real_placement_routing_gds']={'status':'UNAVAILABLE',
                 'remedy':'Install/register LibreLane and its EDA environment, and select a compatible PDK.'}
         elif stages['native_yosys_synthesis']['status']!='PASS':
@@ -147,7 +170,7 @@ def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None =
             stages['real_placement_routing_gds']={'status':'BLOCKED',
                 'reason':'Physical settings invalid; inspect physical_preflight.json'}
         else:
-            flowed=_run_stage(workspace/'physical','physical',rootdir,'physical',physical=physical)
+            flowed=_run_stage(workspace/'physical','physical',rootdir,'physical',physical=physical,execution=execution,distro=distro)
             physical_stage=flowed['stages'].get('physical',{}).get('status')
             evidence=flowed['stages'].get('signoff',{})
             stages['real_placement_routing_gds']={
@@ -195,17 +218,19 @@ def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None =
 
 def main(argv=None):
     ap=argparse.ArgumentParser(description='PICADS v1 baseline hardware-to-GDS acceptance test')
-    ap.add_argument('--output',default='validation/PICADS_v0.16.7_v1_acceptance')
+    ap.add_argument('--output',default='validation/PICADS_v0.16.8_v1_acceptance')
     ap.add_argument('--pdk',default='sky130A')
     ap.add_argument('--pdk-root',default=None)
     ap.add_argument('--std-cell-library',default=None)
     ap.add_argument('--physical-timeout',type=int,default=5400)
     ap.add_argument('--skip-gui',action='store_true')
+    ap.add_argument('--execution',choices=('auto','native','wsl'),default='auto')
+    ap.add_argument('--wsl-distribution',default=None)
     ns=ap.parse_args(argv)
     try:
         report=run_acceptance(Path(ns.output),pdk=ns.pdk,pdk_root=ns.pdk_root,
                               library=ns.std_cell_library,physical_timeout=ns.physical_timeout,
-                              gui=not ns.skip_gui)
+                              gui=not ns.skip_gui,execution=ns.execution,wsl_distribution=ns.wsl_distribution)
     except Exception as exc:
         print(json.dumps({'status':'FAIL','type':type(exc).__name__,'message':str(exc)},indent=2),file=sys.stderr)
         return 1

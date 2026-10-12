@@ -67,13 +67,13 @@ def test_standalone_installer_contains_dynamic_wsl_detection(tmp_path, monkeypat
     batch = Path(report['launcher']).read_text(encoding='utf-8')
     assert Path(report['discovery_helper']).is_file()
     assert 'wsl.exe --list --quiet | findstr' not in batch
-    assert '"%PICADS_PYTHON%" "%~dp0DISCOVER_WSL_DISTRO.py"' in batch
-    assert ':distro_found' in batch
-    assert 'if "%DISCOVERY_RC%"=="2" goto :install_ubuntu' in batch
-    assert 'wsl.exe --distribution "%PICADS_DISTRO%"' in batch
-    assert 'wsl.exe --install -d Ubuntu' in batch
+    assert 'LIBRELANE_SETUP_WINDOWS.py' in batch
     assert str(Path(opt.sys.executable).resolve()) in batch
-    assert 'LIBRELANE_SMOKE_TEST_PASS' in batch
+    setup = Path(report['setup_helper']).read_text()
+    assert 'discover_distro(run=runner)' in setup
+    assert "'wsl.exe', '--distribution', distro" in setup
+    assert "'wsl.exe', '--install', '-d', 'Ubuntu'" in setup
+    assert 'LIBRELANE_SMOKE_TEST_PASS' in setup
     assert not Path(report['directory'], 'backend_smoke_passed.txt').exists()
 
 

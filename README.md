@@ -1,3 +1,15 @@
+## v0.16.8r3 — WSL LibreLane backend recognition
+
+The **WSL LibreLane detection and physical-preflight fix** is documented in
+[`docs/WSL_LIBRELANE_RECOGNITION_FIX_v0.16.8r3.md`](docs/WSL_LIBRELANE_RECOGNITION_FIX_v0.16.8r3.md).
+Use `CHECK_LIBRELANE_WSL.bat` for a read-only live backend probe after the
+LibreLane 80-stage smoke test succeeds. PICADS now reports the recorded WSL
+installation separately from native Windows executable registrations.
+
+> **v0.16.8 standalone installer repair:** The setup helper basename now matches its import; a backward-compatible fallback repairs earlier staged launchers. See [import fix instructions](docs/STANDALONE_LIBRELANE_IMPORT_FIX_v0.16.8.md).
+
+> **v0.16.8 WSL/Docker detection hotfix:** The LibreLane setup now uses a standalone Python state-machine for existing Ubuntu and running Docker Desktop detection, avoids duplicate installations when PICADS has a stale PATH, validates Docker inside WSL separately, and runs LibreLane from its managed virtual environment. See [v0.16.8 recovery guide](docs/WSL_DOCKER_DETECTION_RECOVERY_v0.16.8.md).
+
 > **v0.16.7 Docker hotfix:** LibreLane setup now uses Docker Desktop's official signed **per-user** Windows installer rather than WinGet's machine-wide path. It reuses cached signed installers and the existing WSL distro, and preserves all installed PICADS dependencies. See [recovery guide](docs/DOCKER_PER_USER_RECOVERY_v0.16.7.md).
 
 > **v0.16.6 Windows hotfix:** LibreLane setup now detects and reuses existing WSL distributions, including `Ubuntu-24.04`, instead of incorrectly running `wsl --install -d Ubuntu`. See [WSL setup fix](docs/WSL_DISCOVERY_HOTFIX_v0.16.6.md). Existing `dependencies/` files and installed WSL distributions are not changed by the patch.

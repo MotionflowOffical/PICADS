@@ -767,8 +767,11 @@ class Window(QMainWindow):
                 message={'status':'BLOCKED','reason':'Compilation failed before physical preflight',
                          'issues':report.issues}
             else:
+                toolconf=session.project.config.get('tools') or {}
                 preflight=physical_preflight(session.project.config.get('physical') or {},
-                                             session.dls.requires_clock())
+                                             session.dls.requires_clock(),
+                                             execution=toolconf.get('execution','native'),
+                                             wsl_distribution=toolconf.get('wsl_distribution'))
                 message=preflight.as_dict()
                 message['compile_status']=report.status
             self.physical_message.setPlainText(json.dumps(message,indent=2,default=str))
@@ -926,10 +929,15 @@ class Window(QMainWindow):
             QMessageBox.warning(self,'Automatic tool detection failed',str(exc))
 
     def refresh_dependencies(self):
+        from .wsl_backend import backend_status
+        wsl_state=backend_status()
         for tool,row in self.dependency_rows.items():
             try:
                 state=tool_status(tool)
-                if state['available']:
+                if tool == 'librelane' and wsl_state['recorded_smoke_pass']:
+                    text=(f"INSTALLED [WSL: {wsl_state['distribution']}] LibreLane smoke-test PASS "
+                          '(historical; use Doctor to check current runtime)')
+                elif state['available']:
                     text=f"AVAILABLE [{state['source']}] {state['path']}"
                 else:
                     text=f"UNAVAILABLE [{state['source']}] {state['error']}"

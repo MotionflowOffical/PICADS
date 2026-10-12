@@ -429,7 +429,8 @@ class BuildSession:
             self.issues.add('PHYSICAL.COMBINATIONAL','WARNING','CONFIG','physical',
                             'The top is combinational. Explicit IO input/output timing constraints may be needed for meaningful timing validation.',
                             remedy='Provide target-specific input/output delays and a suitable timing setup.')
-        preflight=physical_preflight(config, self.dls.requires_clock(), check_tools=(backend!='wsl'))
+        preflight=physical_preflight(config, self.dls.requires_clock(), execution=backend,
+                                     wsl_distribution=wsl_dist)
         atomic_write(self.out/'physical_preflight.json',json.dumps(preflight.as_dict(),indent=2))
         self.result.files['physical_preflight']=str(self.out/'physical_preflight.json')
         self._done('physical_preflight',preflight.status,checks=preflight.checks)
@@ -441,6 +442,15 @@ class BuildSession:
                 remedy='Run `picads physical-preflight PROJECT` and correct the reported settings.',
                 evidence=failed)
             self._done('physical','FAIL',issue_id=i.issue_id);self._block('signoff',i);return
+        missing_backend = [k for k in ('yosys', 'librelane', 'docker_wsl')
+                           if preflight.checks.get(k, {}).get('status') == 'UNAVAILABLE']
+        if backend=='wsl' and missing_backend:
+            i=self.issues.add('PHYSICAL.BACKEND_UNAVAILABLE','ERROR','DEPENDENCY','physical',
+                'Selected physical backend is unavailable: ' + ', '.join(missing_backend),
+                cause='The tools in the selected execution environment could not be reached.',
+                remedy='Verify Docker Desktop WSL integration and the selected Ubuntu distribution; rerun PICADS dependency diagnostics.',
+                evidence={k:preflight.checks[k] for k in missing_backend})
+            self._done('physical','UNAVAILABLE',issue_id=i.issue_id);self._block('signoff',i);return
         period=config.get('clock_period_ns')
         write_librelane_config(name, 'clk' if self.dls.requires_clock() else None,period,
                                self.out/'config.json',extra=preflight.librelane_config)
@@ -456,8 +466,12 @@ class BuildSession:
                                        pdk=str(config['pdk']),run_tag=tag,
                                        tool_path=resolve_tool('librelane') if backend!='wsl' else 'wsl')
         self.result.files['physical_handoff']=str(self.out/'physical_handoff.json')
-        cmd=['librelane']+(['--dockerized'] if config.get('dockerized',False) else [])
-        if config.get('pdk_root'):cmd.extend(['--pdk-root',str(Path(config['pdk_root']).expanduser().resolve())])
+        cmd=['librelane']+(['--dockerized'] if (backend=='wsl' or config.get('dockerized',False)) else [])
+        if config.get('pdk_root'):
+            # WSL root is already a Linux path; do not mangle it with Windows pathlib.
+            root_arg=(str(config['pdk_root']) if backend=='wsl' else
+                      str(Path(config['pdk_root']).expanduser().resolve()))
+            cmd.extend(['--pdk-root',root_arg])
         cmd += ['--pdk',str(config['pdk']),'--run-tag',tag,'config.json']
         result=run_external(cmd,self.out,self.out,self.issues,self.events,'physical',timeout=int(config.get('timeout_s',3600)),**opts)
         if not verify_handoff_inputs(manifest):
