@@ -99,7 +99,7 @@ def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None =
         raise ValueError('physical_timeout must be between 60 and 86400 seconds')
     out=Path(output).resolve();out.mkdir(parents=True,exist_ok=True)
     rootdir=out/'evidence';rootdir.mkdir(exist_ok=True)
-    summary={'schema':1,'product':'PICADS','version':'0.16.0',
+    summary={'schema':1,'product':'PICADS','version':'0.16.1',
              'timestamp_utc':datetime.now(timezone.utc).isoformat(),
              'target':'bounded first-chip RTL-to-GDS acceptance',
              'statuses':{},'manufacturing_qualified':False,
@@ -195,7 +195,7 @@ def run_acceptance(output: Path, *, pdk: str = 'sky130A', pdk_root: str | None =
 
 def main(argv=None):
     ap=argparse.ArgumentParser(description='PICADS v1 baseline hardware-to-GDS acceptance test')
-    ap.add_argument('--output',default='validation/PICADS_v0.16.0_v1_acceptance')
+    ap.add_argument('--output',default='validation/PICADS_v0.16.1_v1_acceptance')
     ap.add_argument('--pdk',default='sky130A')
     ap.add_argument('--pdk-root',default=None)
     ap.add_argument('--std-cell-library',default=None)

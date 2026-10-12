@@ -72,7 +72,7 @@ def main(argv=None)->int:
                 from .windows_installer import install_catalog, dependency_root
                 result={'install_root':str(dependency_root()),'packages':install_catalog()}
             elif ns.operation=='install':
-                if not ns.tool:raise ValueError('Usage: picads dependencies install oss-cad-suite|klayout')
+                if not ns.tool:raise ValueError('Usage: picads dependencies install oss-cad-suite|klayout|kicad|librelane')
                 from .windows_installer import install_selected
                 result=install_selected(ns.tool.split(','),progress=lambda line:print(line,file=sys.stderr,flush=True))
             elif ns.operation=='auto':result={'registry':str(settings_file()),'tools':auto_detect_all()}
@@ -85,8 +85,8 @@ def main(argv=None)->int:
         elif ns.command=='doctor':
             result={'python':sys.version.split()[0],'tools':probe(),'pdk':pdk_status(),'pyside6':bool(__import__('importlib').util.find_spec('PySide6')),
                     'status':'External tools are optional for compile; native tools enable RTL tests; ASIC physical backend remains optional and separately configured',
-                    'windows_native_installable':['oss-cad-suite','klayout'],
-                    'full_asic_backend':'LibreLane via optional WSL2/Docker (not native Windows)'}
+                    'windows_native_installable':['oss-cad-suite','klayout','kicad (WinGet)'],
+                    'full_asic_backend':'LibreLane selectable guided WSL2/Docker setup (not native Windows; smoke test required)'}
         elif ns.command=='init':result=init_project(Path(ns.project))
         elif ns.command=='backup':result=snapshot(Path(ns.project),ns.label)
         elif ns.command=='restore':result=restore(Path(ns.project),Path(ns.archive),ns.confirm)

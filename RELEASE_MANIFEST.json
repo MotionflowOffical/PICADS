@@ -1,20 +1,23 @@
 {
   "product": "PICADS",
-  "version": "0.16.0",
+  "version": "0.16.1",
   "format": "flat cumulative source ZIP",
-  "scope": "Native Windows EDA dependency downloads, GUI opt-in selection and registration, portable OSS CAD Suite/KLayout, explicit optional physical backend",
+  "changes": [
+    "KiCad checkbox enabled, official WinGet installation with preferred dependency folder and verified registration",
+    "LibreLane checkbox enabled, guided optional WSL2/Docker/Ubuntu setup console with smoke-test marker",
+    "Settings user confirmation for WSL/Docker setup and accurate partial status",
+    "Updated CLI installer support, regression tests, versioned diagnostics launchers and documentation"
+  ],
   "verification": {
-    "previous_full_local_pytest": "500 passed, 3 skipped (before final two focused installer tests)",
-    "new_focused_installer_regression": "40 passed, 0 failed (tests/test_windows_installer.py + tests/test_iteration14.py)",
-    "additional_focused": "73 passed, 1 skipped (relevant integration group before final KLayout test)",
-    "later_all_in_one": "INCOMPLETE (execution timeout; do not count as pass)",
-    "gui_runtime": "UNVERIFIED (PySide6 unavailable in local environment)",
-    "real_upstream_download": "UNVERIFIED (no Windows host run)",
-    "native_eda_execution": "UNVERIFIED on Windows",
-    "offline_mock_download_and_archive_safety": "PASS",
+    "selected_regression_group": "216 passed, 0 failed (specific listed test groups)",
+    "focused_optional_install": "25 passed, 1 GUI test skipped",
+    "qt_runtime": "UNVERIFIED: no PySide6",
+    "real_winget_install": "UNVERIFIED: no Windows host available",
+    "real_wsl_docker_librelane_setup": "UNVERIFIED: no Windows host available",
+    "complete_historical_regression": "INCOMPLETE: large combined run timed out",
     "manufacturing_signoff": "NOT_IMPLEMENTED"
   },
-  "bundled_binaries": false,
-  "asic_physical_backend": "Optional WSL2/Docker LibreLane; native standalone synthesis/layout inspection do not implement full mask signoff",
-  "release_files_excluding_hash_manifest": 268
+  "bundled_external_binaries": false,
+  "caution": "Native KiCad installation depends on WinGet and may ignore requested folder; LibreLane installation is guided and requires real Windows and WSL2/Docker validation.",
+  "files_excluding_hash_manifest": 271
 }

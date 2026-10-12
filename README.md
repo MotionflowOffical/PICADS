@@ -1,12 +1,18 @@
-# PICADS v0.16.0
+# PICADS v0.16.1
 
 **Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
+
+## v0.16.1 — KiCad/LibreLane selectable installer fix
+
+**Fixed:** KiCad and LibreLane checkboxes can now be selected. KiCad is installed with the native Windows Package Manager (WinGet), requesting a directory under `dependencies/` where supported and registering the actual program path after installation. LibreLane launches a **visible, explicitly confirmed** Windows WSL2/Docker setup console; administrator approval, Ubuntu first-run setup, Docker integration, and reboots can be required. The LibreLane installer returns `SETUP_STARTED`, not a fabricated `INSTALLED` result. Full end-to-end physical execution still requires Windows testing and a supported PDK.
+
+[Read the KiCad and LibreLane setup instructions](docs/WINDOWS_INSTALLER_PATCH_v0.16.1.md).
 
 ## v0.16.0 — Windows-first native dependency installation
 
 PICADS now has **Settings → Install / Manage Windows Tools...**. You can check the optional packages you want (none are selected by default) and download their upstream **Windows** portable archives into `PICADS/dependencies/`. The installer identifies supported tools, saves paths to the PICADS per-user registry, records SHA-256 hashes, and keeps the GUI responsive while downloading. Managed installation status is checked separately from tools discovered on PATH, and incomplete installs are never silently overwritten. The original manual **Choose App** and **Choose Folder** controls remain available.
 
-The supported direct downloads are **OSS CAD Suite for Windows x64** (Yosys, Icarus, Verilator, and available formal tools) and the official Windows ZIP of **KLayout**. No Linux runtime is needed for PICADS compilation, DLS simulation, or these native RTL tools. **LibreLane is not supplied as a fake Windows executable**: for full ASIC place-and-route it currently requires an optional WSL2/Docker backend and a working PDK. KiCad is for PCB design, not an ASIC mask flow.
+The supported direct portable downloads are **OSS CAD Suite for Windows x64** (Yosys, Icarus, Verilator, and available formal tools) and the official Windows ZIP of **KLayout**. No Linux runtime is needed for PICADS compilation, DLS simulation, or these native RTL tools. **LibreLane is selectable for its guided Windows backend setup, but is not supplied as a fake Windows executable**: for full ASIC place-and-route it currently requires an optional WSL2/Docker backend and a working PDK. KiCad is for PCB design, not an ASIC mask flow.
 
 [Read the Windows installation and verification guide](docs/WINDOWS_NATIVE_DEPENDENCIES_v0.16.0.md). Native package download and actual Windows process execution still require live testing on Windows; local installer behavior was verified using offline release-shaped archives and security tests.
 
@@ -22,7 +28,7 @@ The cumulative previous release added validated PDK/technology and floorplan pre
 
 The release includes an independently specified **4-bit ALU slice** in [`examples/alu_slice_component`](examples/alu_slice_component/circuit.py) (one piece of a future processor, not a complete chip), with its MCD/CO declarations and no handmade RTL or masks. The compiler's DLS passes a separate 1,024-case truth-table check; errors are injected deliberately to test diagnostics.
 
-**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.0_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
+**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.1_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
 
 For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART.md). See [automated acceptance guide](docs/AUTOMATED_V1_VERIFICATION_v0.15.1.md) and [ALU chip-part specification](docs/ALU_SLICE_REFERENCE_v0.15.1.md).
 
@@ -34,7 +40,7 @@ For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART
 2. Run `SETUP_GUI_WINDOWS.bat` to install Python GUI dependencies if necessary.
 3. Run `RUN_GUI.bat` and use **Settings → External Dependencies → Choose App / Choose Folder** to register Icarus (`iverilog` + `vvp`), Yosys, LibreLane, KLayout and other tools you have.
 4. For the first complete hardware-to-GDS test, run **`RUN_V1_ACCEPTANCE.bat`**. It compiles a bundled synchronous example and attempts real RTL/synthesis/physical checks where the required tools and PDK are available.
-5. Return `validation/PICADS_v0.16.0_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
+5. Return `validation/PICADS_v0.16.1_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
 
 To select a target other than the default `sky130A`, run:
 
@@ -51,7 +57,7 @@ python -m pip install -e ".[test,gui]"
 picads doctor
 picads compile examples/first_physical_chip
 picads physical-preflight examples/first_physical_chip
-python -m chipcompiler.acceptance --output validation/PICADS_v0.16.0_v1_acceptance
+python -m chipcompiler.acceptance --output validation/PICADS_v0.16.1_v1_acceptance
 python -m pytest -q tests/test_iteration14.py
 ```
 

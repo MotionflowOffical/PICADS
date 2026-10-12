@@ -1,12 +1,12 @@
-# PICADS v0.16.0 — Windows test quick start
+# PICADS v0.16.1 — Windows test quick start
 
 ## What to do
 
-1. **Extract** `PICADS_Source_v0.16.0.zip` completely (do not run the batch file inside a ZIP preview).
+1. **Extract** `PICADS_Source_v0.16.1.zip` completely (do not run the batch file inside a ZIP preview).
 2. Have **Python 3.10+** installed. The launcher checks for PySide6, pytest, PyYAML, and pycparser and offers automatic user-profile installation if missing.
 3. Optional but recommended: run `RUN_GUI.bat`, open **Settings → External Dependencies**, and register **Icarus (`iverilog` and `vvp`), Yosys, LibreLane** and a compatible PDK using **Choose App / Choose Folder**. Native checks are marked unavailable if these are absent.
 4. Double-click **`RUN_PICADS_AUTOTEST.bat`**. Do not close the console while tests are running; native place/route may take a long time.
-5. **Upload exactly one file**: `validation/PICADS_v0.16.0_automated_diagnostics.zip`.
+5. **Upload exactly one file**: `validation/PICADS_v0.16.1_automated_diagnostics.zip`.
 
 ## What's inside the one ZIP
 

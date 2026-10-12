@@ -95,11 +95,14 @@ def test_selection_avoids_unrequested_packages(monkeypatch,tmp_path):
     assert 'oss-cad-suite' not in result['packages']
 
 
-def test_no_native_windows_archive_for_librelane_or_kicad(monkeypatch):
-    with pytest.raises(wi.PackageInstallError,match='no approved native'):
-        wi.install_package('librelane')
-    with pytest.raises(wi.PackageInstallError,match='no approved native'):
-        wi.install_package('kicad')
+def test_optional_packages_use_explicit_windows_installers(monkeypatch):
+    from chipcompiler import windows_optional_install as optional
+    calls=[]
+    monkeypatch.setattr(optional,'install_kicad',lambda root,progress: calls.append('kicad') or {'status':'INSTALLED'})
+    monkeypatch.setattr(optional,'stage_librelane',lambda root,progress: calls.append('librelane') or {'status':'SETUP_STARTED'})
+    assert wi.install_package('kicad')['status']=='INSTALLED'
+    assert wi.install_package('librelane')['status']=='SETUP_STARTED'
+    assert calls==['kicad','librelane']
 
 
 def test_windows_exe_activation_is_child_only(monkeypatch,tmp_path):
@@ -199,7 +202,8 @@ def test_install_catalog_respects_optional_binaries_and_managed_paths(tmp_path, 
     assert catalog['oss-cad-suite']['can_install'] is False
     assert catalog['klayout']['installed'] is False
     assert catalog['klayout']['can_install'] is True
-    assert catalog['librelane']['can_install'] is False
+    assert catalog['librelane']['can_install'] is True
+    assert catalog['kicad']['can_install'] is True
     # Deleting a managed executable should never make the UI advertise a
     # successful install or overwrite its directory without permission.
     (bindir / 'yosys.exe').unlink()

@@ -55,16 +55,16 @@ PACKAGES = {
     },
     'librelane': {
         'label': 'LibreLane — complete ASIC physical design',
-        'purpose': 'Optional Docker/WSL2 backend; no native Windows archive',
-        'mode': 'external-backend',
+        'purpose': 'Guided WSL2 + Docker Desktop setup (optional; may require restart)',
+        'mode': 'guided-wsl',
         'tools': ('librelane',),
         'required': False,
         'source': 'https://librelane.readthedocs.io/en/stable/installation/index.html',
     },
     'kicad': {
         'label': 'KiCad — optional PCB design companion',
-        'purpose': 'PCB editing only; not an IC placement/routing/signoff backend',
-        'mode': 'guided',
+        'purpose': 'Install KiCad through WinGet; PCB editing only, not IC physical signoff',
+        'mode': 'winget',
         'tools': ('kicad', 'kicad-cli'),
         'required': False,
         'source': 'https://www.kicad.org/download/windows/',
@@ -108,13 +108,19 @@ def install_catalog() -> list[dict]:
                     (package_dir / files[t]).is_file() for t in essential)
             except (OSError, ValueError, TypeError, KeyError):
                 managed = False
+        if key == 'kicad':
+            managed = managed or bool((package_dir / 'picads_install_receipt.json').is_file() and states['kicad']['available'])
+        if key == 'librelane':
+            managed = (package_dir / 'backend_smoke_passed.txt').is_file()
+        can_install = ((spec['mode'] == 'portable' and not package_dir.exists()) or
+                       spec['mode'] in ('winget', 'guided-wsl'))
         rows.append({'id': key, 'name': spec['label'], 'purpose': spec['purpose'],
                      'mode': spec['mode'], 'required': spec['required'],
                      'source': spec['source'],
                      'available': all(s['available'] for s in states.values()),
                      'installed': managed,
                      'managed_path_exists': package_dir.exists(),
-                     'can_install': spec['mode'] == 'portable' and not package_dir.exists(),
+                     'can_install': can_install,
                      'receipt': str(receipt_path) if managed else None,
                      'tools': states})
     return rows
@@ -324,6 +330,10 @@ def install_package(package: str, *, progress: Callable[[str], None] | None = No
     """
     progress = progress or (lambda msg: None)
     if package not in PACKAGES:raise PackageInstallError('Unknown package: '+package)
+    if package in ('kicad', 'librelane'):
+        from .windows_optional_install import install_kicad, stage_librelane
+        root = dependency_root()
+        return install_kicad(root, progress) if package == 'kicad' else stage_librelane(root, progress)
     if PACKAGES[package]['mode'] != 'portable':
         raise PackageInstallError(f'{package} has no approved native portable Windows package. See {PACKAGES[package]["source"]}')
     if sys.platform != 'win32' and asset_override is None:

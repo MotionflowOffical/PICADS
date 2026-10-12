@@ -199,14 +199,18 @@ class WindowsInstallerDialog(QDialog):
             check.setChecked(False)
             self.choices[spec['id']] = check
             layout.addWidget(check)
-            if spec['installed']:
-                status = 'already installed in PICADS/dependencies/'
-            elif spec['managed_path_exists']:
+            if spec['installed'] and spec['id']=='librelane':
+                status = 'WSL smoke-test marker present; complete PICADS backend configuration'
+            elif spec['installed']:
+                status = 'installed / registered with PICADS'
+            elif spec['managed_path_exists'] and spec['mode']=='portable':
                 status = 'existing managed directory needs inspection; will not overwrite'
             elif spec['mode'] == 'portable':
-                status = 'downloadable official native Windows archive'
+                status = 'downloadable native Windows archive'
+            elif spec['mode'] == 'winget':
+                status = 'selectable: native WinGet installer; preferred folder may not be honored'
             else:
-                status = 'optional external integration; no native portable archive'
+                status = 'selectable: opens guided WSL2/Docker setup console, may require reboot'
             purpose = QLabel('  '+spec['purpose']+' — '+status)
             purpose.setWordWrap(True);purpose.setStyleSheet('color:#a9bcc7')
             layout.addWidget(purpose)
@@ -224,12 +228,18 @@ class WindowsInstallerDialog(QDialog):
         bar.addWidget(self.install_button)
         close = QPushButton('Close');close.clicked.connect(self.reject)
         bar.addWidget(close);layout.addLayout(bar)
-        self.log.appendPlainText('LibreLane full ASIC flow is an optional backend: its supported Windows setup uses WSL2/Docker. No Linux requirement for PICADS editing, compilation, or native RTL tests.')
+        self.log.appendPlainText('All four checkboxes are selectable. KiCad uses WinGet (may install outside dependencies/). LibreLane launches a guided WSL2/Docker setup; its success is not assumed. PICADS native compilation needs neither.')
     def begin_install(self):
         selected = [name for name,box in self.choices.items() if box.isChecked()]
         if not selected:
-            QMessageBox.information(self,'No packages selected','Check at least one native Windows package to install.')
+            QMessageBox.information(self,'No packages selected','Check at least one optional dependency to install or configure.')
             return
+        if 'librelane' in selected:
+            choice=QMessageBox.question(self, 'LibreLane requires Windows backend setup',
+                'LibreLane needs WSL2 Ubuntu and Docker Desktop. Setup may request administrator approval, Linux credentials, a reboot and Docker WSL integration.\n\n'
+                'PICADS will launch a visible setup console and will NOT mark the backend installed until its smoke test succeeds. Continue?',
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No)
+            if choice != QMessageBox.StandardButton.Yes: return
         self.running = True
         self.install_button.setEnabled(False)
         for box in self.choices.values():box.setEnabled(False)
@@ -244,7 +254,11 @@ class WindowsInstallerDialog(QDialog):
         self.log.appendPlainText(json.dumps(result,indent=2))
         self.install_button.setEnabled(True)
         if result.get('status')!='PASS':
-            QMessageBox.warning(self,'Some packages not installed','Installation was incomplete. Review logs and retry or register an installed app manually.')
+            if any(v.get('status')=='SETUP_STARTED' for v in result.get('packages',{}).values()):
+                QMessageBox.information(self,'Backend setup started',
+                    'LibreLane setup is running in a separate Windows console. Follow its prompts, including reboot or Docker configuration if requested. Other results are in the installer log.')
+            else:
+                QMessageBox.warning(self,'Some packages not installed','Installation was incomplete. Review logs and retry or register an installed app manually.')
         parent = self.parent()
         if parent and hasattr(parent,'refresh_dependencies'):parent.refresh_dependencies()
     def reject(self):
