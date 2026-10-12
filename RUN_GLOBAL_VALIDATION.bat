@@ -8,10 +8,10 @@ if not errorlevel 1 (
 ) else (
   set "PYCMD=python"
 )
-echo PICADS 0.16.6 - global source shared operator validation
-%PYCMD% -m chipcompiler.global_validation --output validation\PICADS_v0.16.6_global_diagnostics %*
+echo PICADS 0.16.7 - global source shared operator validation
+%PYCMD% -m chipcompiler.global_validation --output validation\PICADS_v0.16.7_global_diagnostics %*
 set "RET=%ERRORLEVEL%"
-echo Diagnostics: validation\PICADS_v0.16.6_global_diagnostics.zip
+echo Diagnostics: validation\PICADS_v0.16.7_global_diagnostics.zip
 echo Status: %RET%  ^(0=PASS; 2=PARTIAL missing native tools; 1=FAIL^)
 pause
 exit /b %RET%

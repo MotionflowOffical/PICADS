@@ -24,7 +24,7 @@ from .dependencies import probe_tools
 from .project import atomic_write
 
 ROOT=Path(__file__).resolve().parents[2]
-VERSION='0.16.6'
+VERSION='0.16.7'
 
 
 def _invoke(command:list[str],directory:Path,env:dict,log:Path,timeout:int)->dict:
@@ -394,7 +394,7 @@ def _emergency_report(destination:Path,exc:BaseException)->Path:
 
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Automated PICADS v1 feature and physical acceptance testing')
-    parser.add_argument('--output',default='validation/PICADS_v0.16.6_automated_diagnostics')
+    parser.add_argument('--output',default='validation/PICADS_v0.16.7_automated_diagnostics')
     parser.add_argument('--full-regression',action='store_true',help='Optional developer maintenance only: historical regression files (NOT default feature verification)')
     parser.add_argument('--skip-native',action='store_true',help='Skip real Icarus/Yosys/LibreLane native tool check')
     parser.add_argument('--skip-gui',action='store_true',help='Skip Qt automated user journeys')

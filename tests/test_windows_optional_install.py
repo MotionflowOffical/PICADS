@@ -62,7 +62,8 @@ def test_librelane_preparation_requires_explicit_launch(monkeypatch,tmp_path):
     assert len(started)==1
     script=Path(result['launcher']).read_text()
     assert 'wsl.exe --install -d Ubuntu' in script
-    assert 'Docker.DockerDesktop' in script
+    assert 'INSTALL_DOCKER_PER_USER.ps1' in script
+    assert Path(result['docker_installer_helper']).is_file()
     assert '--smoke-test' in script
     assert 'backend_smoke_passed.txt' in script
     assert not Path(result['directory'],'backend_smoke_passed.txt').exists()

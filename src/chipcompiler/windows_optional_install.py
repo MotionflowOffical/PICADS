@@ -126,6 +126,90 @@ def install_kicad(root: Path, progress: Callable[[str], None], *, run=None,
             'install_log': str(dest / 'winget_install.log')}
 
 
+# The script is staged as a local file only when the user selects LibreLane.
+# Docker's official EXE supports --user; do not use WinGet machine-wide install.
+# No ACL resets, system-directory deletion, Docker-data cleanup or privilege bypass.
+DOCKER_PER_USER_INSTALL = r'''param(
+    [Parameter(Mandatory = $true)]
+    [string]$InstallRoot
+)
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+Write-Host 'PICADS Docker Desktop repair: official PER-USER installation, WSL2 backend'
+Write-Host 'Existing WSL, Docker data and C:\ProgramData security settings will not be modified.'
+
+function Test-DockerInstallerSignature([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+    try {
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path
+        if ($signature.Status -ne 'Valid' -or -not $signature.SignerCertificate) { return $false }
+        if ($signature.SignerCertificate.Subject -notmatch '(?i)Docker') { return $false }
+        return $true
+    } catch { return $false }
+}
+
+try {
+    $cache = Join-Path $InstallRoot 'docker-installer-cache'
+    New-Item -Path $cache -ItemType Directory -Force | Out-Null
+    $installer = Join-Path $cache 'Docker Desktop Installer.exe'
+    $verified = $null
+    if (Test-DockerInstallerSignature $installer) {
+        $verified = $installer
+        Write-Host 'Reusing signed installer from PICADS cache.'
+    }
+    if (-not $verified) {
+        # Previous WinGet attempts may have already downloaded ~600 MB here.
+        # Only two levels of this known directory are searched; no arbitrary
+        # executables are trusted merely because they have the right name.
+        $prior = Join-Path $env:LOCALAPPDATA 'Temp\DockerDesktopInstallers'
+        if (Test-Path -LiteralPath $prior -PathType Container) {
+            $folders = @(Get-ChildItem -LiteralPath $prior -Directory -ErrorAction SilentlyContinue |
+                Sort-Object LastWriteTime -Descending | Select-Object -First 30)
+            foreach ($folder in $folders) {
+                $candidate = Join-Path $folder.FullName 'Docker Desktop Installer.exe'
+                if (Test-DockerInstallerSignature $candidate) {
+                    $verified = $candidate
+                    Write-Host 'Reusing Windows-signed installer cached from previous attempt.'
+                    break
+                }
+            }
+        }
+    }
+    if (-not $verified) {
+        $url = 'https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe'
+        $partial = Join-Path $cache 'Docker Desktop Installer.download'
+        if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Force }
+        Write-Host 'Downloading Docker Desktop from the official Docker website...'
+        Invoke-WebRequest -Uri $url -OutFile $partial -UseBasicParsing
+        if (-not (Test-DockerInstallerSignature $partial)) {
+            throw 'Official download failed Windows Authenticode validation. Nothing was executed.'
+        }
+        Move-Item -LiteralPath $partial -Destination $installer -Force
+        $verified = $installer
+    }
+    if (-not (Test-DockerInstallerSignature $verified)) {
+        throw 'Docker installer signature verification failed. Nothing was executed.'
+    }
+    Write-Host ('Signed installer: ' + $verified)
+    Write-Host ('SHA-256: ' + (Get-FileHash -LiteralPath $verified -Algorithm SHA256).Hash)
+    Write-Host 'Starting per-user installer (no machine-wide elevation requested)...'
+    $proc = Start-Process -FilePath $verified -ArgumentList @('install', '--user', '--backend=wsl-2') -Wait -PassThru
+    if ($null -eq $proc -or $proc.ExitCode -ne 0) {
+        $code = if ($null -eq $proc) { 'unknown' } else { $proc.ExitCode }
+        throw ('Docker installer exited with code ' + $code + '. Check Docker installation logs.')
+    }
+    Write-Host 'Docker Desktop per-user installation finished.'
+    Write-Host 'Start Docker Desktop and enable Settings > Resources > WSL Integration.'
+    exit 0
+} catch {
+    Write-Host ('Docker per-user setup FAILED: ' + $_.Exception.Message)
+    Write-Host 'If a previous all-users install was interrupted, reboot and retry.'
+    Write-Host 'Do not manually change system-folder owners or delete Docker data.'
+    Write-Host 'Official instructions: https://docs.docker.com/desktop/setup/install/windows-install/'
+    exit 1
+}
+'''
+
 # Standalone console by design: WSL distro setup and sudo can request input,
 # while Docker Desktop may require first-run configuration and a reboot.
 # The installer must never incorrectly report a background setup as success.
@@ -174,17 +258,38 @@ wsl.exe --distribution "%PICADS_DISTRO%" --exec sh -c "printf 'PICADS_WSL_READY'
 if errorlevel 1 goto :pending
 :docker
 echo [2/5] Checking Docker Desktop...
+rem Docker Desktop 4.8x+ offers an official per-user install. WinGet's
+rem machine-wide installer can fail when ProgramData\DockerDesktop has the
+rem wrong owner. PICADS must not change system ACLs or delete Docker data.
 where docker.exe >nul 2>nul
 if not errorlevel 1 goto :dockercheck
-where winget.exe >nul 2>nul
-if errorlevel 1 (
- echo Install Docker Desktop from https://docs.docker.com/desktop/setup/install/windows-install/
+rem The per-user installer does not necessarily update this cmd process PATH.
+if exist "%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin\docker.exe" (
+ set "PATH=%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin;%PATH%"
+ goto :dockercheck
+)
+if exist "%ProgramFiles%\Docker\Docker\resources\bin\docker.exe" (
+ set "PATH=%ProgramFiles%\Docker\Docker\resources\bin;%PATH%"
+ goto :dockercheck
+)
+if exist "%LOCALAPPDATA%\Programs\DockerDesktop\Docker Desktop.exe" goto :docker_installed
+if exist "%ProgramFiles%\Docker\Docker\Docker Desktop.exe" goto :docker_installed
+if not exist "%~dp0INSTALL_DOCKER_PER_USER.ps1" (
+ echo Per-user Docker setup helper is missing. Reinstall the PICADS hotfix.
  goto :pending
 )
-echo Installing Docker Desktop via the official WinGet package...
-winget install --id Docker.DockerDesktop --exact --source winget --accept-package-agreements --accept-source-agreements
+echo Docker Desktop is not detected. Starting the official per-user WSL2 installer.
+echo PICADS will not change ownership or delete C:\ProgramData\DockerDesktop.
+where powershell.exe >nul 2>nul
+if errorlevel 1 (
+ echo Windows PowerShell is not available to download/verify the official installer.
+ goto :pending
+)
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%~dp0INSTALL_DOCKER_PER_USER.ps1" -InstallRoot "%CD%"
 if errorlevel 1 goto :pending
-echo Start Docker Desktop, enable WSL2 integration for %PICADS_DISTRO%, then rerun.
+:docker_installed
+echo Start Docker Desktop and enable WSL2 integration for %PICADS_DISTRO%.
+echo Then rerun this setup from PICADS. Installation alone does not prove Docker works.
 goto :pending
 :dockercheck
 echo [3/5] Checking Docker daemon and WSL integration...
@@ -235,6 +340,8 @@ def stage_librelane(root: Path, progress: Callable[[str], None], *, launch=True,
     helper = folder / 'DISCOVER_WSL_DISTRO.py'
     helper.write_text(Path(__file__).with_name('wsl_backend_discovery.py').read_text(encoding='utf-8'),
                       encoding='utf-8')
+    docker_helper = folder / 'INSTALL_DOCKER_PER_USER.ps1'
+    docker_helper.write_text(DOCKER_PER_USER_INSTALL, encoding='utf-8-sig')
     # Use the same Windows interpreter that is currently running PICADS.
     # The distribution discovery runs before any Linux/Docker installation.
     launch_script = LIBRELANE_SETUP.replace('__PICADS_PYTHON__', str(Path(sys.executable).resolve()))
@@ -251,7 +358,7 @@ def stage_librelane(root: Path, progress: Callable[[str], None], *, launch=True,
             raise GuidedSetupError('Setup script saved, but could not open the Windows console: ' + str(exc)) from exc
         progress('LibreLane setup console opened. Complete its prompts; the GUI does not wait for or claim success.')
     return {'status': 'SETUP_STARTED' if launch else 'SETUP_REQUIRED',
-            'package': 'librelane', 'directory': str(folder), 'launcher': str(launcher), 'discovery_helper': str(helper),
+            'package': 'librelane', 'directory': str(folder), 'launcher': str(launcher), 'discovery_helper': str(helper), 'docker_installer_helper': str(docker_helper),
             'message': 'WSL2, Docker Desktop and Ubuntu initialization may need approval/restart. Rerun the launcher after reboot; smoke-test evidence is required.'}
 
 

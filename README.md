@@ -1,3 +1,5 @@
+> **v0.16.7 Docker hotfix:** LibreLane setup now uses Docker Desktop's official signed **per-user** Windows installer rather than WinGet's machine-wide path. It reuses cached signed installers and the existing WSL distro, and preserves all installed PICADS dependencies. See [recovery guide](docs/DOCKER_PER_USER_RECOVERY_v0.16.7.md).
+
 > **v0.16.6 Windows hotfix:** LibreLane setup now detects and reuses existing WSL distributions, including `Ubuntu-24.04`, instead of incorrectly running `wsl --install -d Ubuntu`. See [WSL setup fix](docs/WSL_DISCOVERY_HOTFIX_v0.16.6.md). Existing `dependencies/` files and installed WSL distributions are not changed by the patch.
 
 # PICADS v0.16.5

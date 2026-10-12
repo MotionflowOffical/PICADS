@@ -1,17 +1,17 @@
 {
   "product": "PICADS",
-  "version": "0.16.6",
-  "type": "cumulative source; WSL LibreLane existing-distro installer fix",
+  "version": "0.16.7",
+  "type": "cumulative Windows Docker per-user installer hotfix",
   "changes": [
-    "Detect installed WSL distros using Unicode-safe Python subprocess reads, not findstr on WSL UTF-16 output",
-    "Reuse installed Ubuntu-24.04, Ubuntu, Debian or other runnable user WSL distributions",
-    "Never attempt duplicate Ubuntu installation when an existing Linux distro is present but not initialized",
-    "Use discovered distribution consistently during Docker integration and LibreLane smoke test",
-    "Stage helper into dependencies/librelane at explicit installation time and preserve all existing installed EDA files"
+    "WSL guided setup uses Docker official EXE --user --backend=wsl-2 instead of WinGet machine-wide installation",
+    "Reuses Authenticode-validated previous Docker installers in bounded cache locations",
+    "Finds Docker CLI after per-user installation even before PATH refresh",
+    "No changes to system ACLs, ProgramData ownership, Docker data, or existing WSL distros",
+    "Validates actual Docker daemon and LibreLane smoke test before marking setup complete"
   ],
   "verification": {
-    "focused_pytest": "109 passed, 1 skipped (PySide6 unavailable)",
-    "actual_windows_wsl_installation": "NOT RUN; requires user Windows verification",
+    "focused_pytest": "81 passed, 1 skipped (Qt unavailable)",
+    "native_powershell_docker_wsl": "NOT RUN in this environment",
     "physical_signoff": "NOT VERIFIED"
   },
   "external_binaries_included": false
