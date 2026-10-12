@@ -1,6 +1,12 @@
-# PICADS v0.16.1
+# PICADS v0.16.2
 
 **Procedural Integrated Circuit Architecture and Design System** — experimental digital EDA software for restricted typed procedural hardware descriptions, MCD/CO architecture generation, executable gate-level DLS, structural Verilog, simulation and scheduling, with integration hooks for established external EDA tools.
+
+## v0.16.2 — OSS CAD Suite Windows registration hotfix
+
+Fixes the actual Windows installation failure after OSS CAD Suite downloaded and extracted successfully: PICADS attempted to register an extensionless `verilator` shell script as a Windows executable. The updated installer registers only Windows launchers, skips non-executable optional files, and supports **offline registration repair** of an already extracted managed toolchain. No repeat download or removal of KiCad is needed.
+
+**If you have the v0.16.1 application and the 2GB OSS CAD Suite already extracted:** overlay the small v0.16.2 patch in the application root and double-click **`REPAIR_OSS_CAD_WINDOWS.bat`**. This repair does not access the network or reinstall the suite. See [recovery guide](docs/WINDOWS_OSS_CAD_RECOVERY_v0.16.2.md).
 
 ## v0.16.1 — KiCad/LibreLane selectable installer fix
 
@@ -28,7 +34,7 @@ The cumulative previous release added validated PDK/technology and floorplan pre
 
 The release includes an independently specified **4-bit ALU slice** in [`examples/alu_slice_component`](examples/alu_slice_component/circuit.py) (one piece of a future processor, not a complete chip), with its MCD/CO declarations and no handmade RTL or masks. The compiler's DLS passes a separate 1,024-case truth-table check; errors are injected deliberately to test diagnostics.
 
-**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.1_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
+**Start with `RUN_PICADS_AUTOTEST.bat`.** This runs real compiler/CLI commands, source and wiring mutation tests, Qt GUI user-journey tests when PySide6 is installed, and optional installed Icarus/Yosys/LibreLane checks on temporary copies. It writes `validation/PICADS_v0.16.2_automated_diagnostics.zip`. The batch file may install missing Python test/GUI packages into your user environment; it does not install native EDA tools.
 
 For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART.md). See [automated acceptance guide](docs/AUTOMATED_V1_VERIFICATION_v0.15.1.md) and [ALU chip-part specification](docs/ALU_SLICE_REFERENCE_v0.15.1.md).
 
@@ -40,7 +46,7 @@ For a short checklist, see [Windows testing quick start](docs/TESTING_QUICKSTART
 2. Run `SETUP_GUI_WINDOWS.bat` to install Python GUI dependencies if necessary.
 3. Run `RUN_GUI.bat` and use **Settings → External Dependencies → Choose App / Choose Folder** to register Icarus (`iverilog` + `vvp`), Yosys, LibreLane, KLayout and other tools you have.
 4. For the first complete hardware-to-GDS test, run **`RUN_V1_ACCEPTANCE.bat`**. It compiles a bundled synchronous example and attempts real RTL/synthesis/physical checks where the required tools and PDK are available.
-5. Return `validation/PICADS_v0.16.1_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
+5. Return `validation/PICADS_v0.16.2_v1_acceptance.zip` for detailed debugging. `PARTIAL` is expected without the native EDA toolchain.
 
 To select a target other than the default `sky130A`, run:
 
@@ -57,7 +63,7 @@ python -m pip install -e ".[test,gui]"
 picads doctor
 picads compile examples/first_physical_chip
 picads physical-preflight examples/first_physical_chip
-python -m chipcompiler.acceptance --output validation/PICADS_v0.16.1_v1_acceptance
+python -m chipcompiler.acceptance --output validation/PICADS_v0.16.2_v1_acceptance
 python -m pytest -q tests/test_iteration14.py
 ```
 

@@ -48,7 +48,7 @@ def main(argv=None)->int:
             sp.add_argument('--top',help='Specify GDS top cell, required if ambiguous')
             sp.add_argument('--max-shapes',type=int,default=20000)
     dep=commands.add_parser('dependencies',help='List/register/clear external EDA applications and installation folders')
-    dep.add_argument('operation',choices=('list','set','clear','auto','catalog','install'),nargs='?',default='list')
+    dep.add_argument('operation',choices=('list','set','clear','auto','catalog','install','repair'),nargs='?',default='list')
     dep.add_argument('tool',nargs='?')
     dep.add_argument('path',nargs='?')
     dep.add_argument('--folder',action='store_true',help='Register installation directory instead of executable')
@@ -75,6 +75,10 @@ def main(argv=None)->int:
                 if not ns.tool:raise ValueError('Usage: picads dependencies install oss-cad-suite|klayout|kicad|librelane')
                 from .windows_installer import install_selected
                 result=install_selected(ns.tool.split(','),progress=lambda line:print(line,file=sys.stderr,flush=True))
+            elif ns.operation=='repair':
+                if not ns.tool:raise ValueError('Usage: picads dependencies repair oss-cad-suite|klayout')
+                from .windows_installer import repair_package
+                result=repair_package(ns.tool, progress=lambda line:print(line,file=sys.stderr,flush=True))
             elif ns.operation=='auto':result={'registry':str(settings_file()),'tools':auto_detect_all()}
             elif ns.operation=='set':
                 if not ns.tool or not ns.path:raise ValueError('Usage: picads dependencies set TOOL PATH [--folder]')

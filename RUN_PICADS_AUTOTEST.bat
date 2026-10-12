@@ -2,11 +2,11 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "PYTHONPATH=%~dp0src"
-set "OUT=validation\PICADS_v0.16.1_automated_diagnostics"
+set "OUT=validation\PICADS_v0.16.2_automated_diagnostics"
 if not exist "validation" mkdir "validation"
 if not exist "%OUT%" mkdir "%OUT%"
 set "STARTLOG=%OUT%\launcher.log"
-echo PICADS v0.16.1 Windows automatic test bootstrap>"%STARTLOG%"
+echo PICADS v0.16.2 Windows automatic test bootstrap>"%STARTLOG%"
 echo Test started: %DATE% %TIME%>>"%STARTLOG%"
 echo. 
 echo ========================================================

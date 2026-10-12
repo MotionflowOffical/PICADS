@@ -112,7 +112,12 @@ def install_catalog() -> list[dict]:
             managed = managed or bool((package_dir / 'picads_install_receipt.json').is_file() and states['kicad']['available'])
         if key == 'librelane':
             managed = (package_dir / 'backend_smoke_passed.txt').is_file()
-        can_install = ((spec['mode'] == 'portable' and not package_dir.exists()) or
+        # A valid managed receipt makes an installation safely re-registrable
+        # without downloading or touching the already extracted toolchain.
+        can_repair = (spec['mode'] == 'portable' and
+                      receipt_path.is_file() and
+                      isinstance(receipt, dict) and receipt.get('package') == key)
+        can_install = ((spec['mode'] == 'portable' and (not package_dir.exists() or can_repair)) or
                        spec['mode'] in ('winget', 'guided-wsl'))
         rows.append({'id': key, 'name': spec['label'], 'purpose': spec['purpose'],
                      'mode': spec['mode'], 'required': spec['required'],
@@ -120,7 +125,7 @@ def install_catalog() -> list[dict]:
                      'available': all(s['available'] for s in states.values()),
                      'installed': managed,
                      'managed_path_exists': package_dir.exists(),
-                     'can_install': can_install,
+                     'can_repair': can_repair, 'can_install': can_install,
                      'receipt': str(receipt_path) if managed else None,
                      'tools': states})
     return rows
@@ -306,72 +311,172 @@ def _download(asset: dict, path: Path, progress: Callable[[str], None]) -> str:
     return value
 
 
+_WINDOWS_LAUNCHER_SUFFIXES = frozenset(('.exe', '.com', '.cmd', '.bat'))
+
+
+def _supported_windows_launcher(path: Path) -> bool:
+    """Reject extensionless POSIX scripts in mixed-platform Windows bundles.
+
+    OSS CAD Suite includes shell/Python entry points named e.g. ``verilator``.
+    A file with that name isn't directly registerable using PICADS's Windows
+    app registry. Only register a native executable or Windows launcher.
+    """
+    return path.is_file() and path.suffix.lower() in _WINDOWS_LAUNCHER_SUFFIXES
+
+
 def _find_binary(root: Path, name: str) -> Path | None:
     preferred = (root / 'oss-cad-suite' / 'bin', root / 'bin', root)
+    aliases = [alias for alias in TOOLS[name] if
+               Path(alias).suffix.lower() in _WINDOWS_LAUNCHER_SUFFIXES]
+    # A Windows release can include an extensionless shell script and an EXE
+    # with the same stem. Always prefer launchable Windows executables.
     for folder in preferred:
-        for alias in TOOLS[name]:
+        for alias in aliases:
             candidate = folder / alias
-            if candidate.is_file():return candidate
-    # Extracted bundles may add a top-level wrapper directory.
-    for candidate in root.glob('*/oss-cad-suite/bin/*'):
-        if candidate.name.lower() in {a.lower() for a in TOOLS[name]} and candidate.is_file():return candidate
+            if _supported_windows_launcher(candidate):
+                return candidate
+    # A release archive may contain an extra outer directory.
+    for folder in root.glob('*/oss-cad-suite/bin'):
+        if not folder.is_dir():
+            continue
+        for alias in aliases:
+            candidate = folder / alias
+            if _supported_windows_launcher(candidate):
+                return candidate
     if name == 'klayout':
         for candidate in root.rglob('klayout_app.exe'):
-            if candidate.is_file():return candidate
+            if _supported_windows_launcher(candidate):
+                return candidate
     return None
+
+
+def _required_tools(package: str) -> tuple[str, ...]:
+    return ('yosys', 'iverilog', 'vvp') if package == 'oss-cad-suite' else ('klayout',)
+
+
+def _scan_native_tools(root: Path, package: str, progress: Callable[[str], None]) -> dict[str, Path]:
+    found: dict[str, Path] = {}
+    for tool in PACKAGES[package]['tools']:
+        path = _find_binary(root, tool)
+        if path is not None:
+            found[tool] = path.relative_to(root)
+        elif tool not in _required_tools(package):
+            progress(f'Optional {tool}: no directly launchable Windows binary found; skipped registration')
+    missing = set(_required_tools(package)) - set(found)
+    if missing:
+        raise PackageInstallError('Managed archive lacks required Windows executables: '+', '.join(sorted(missing)))
+    return found
+
+
+def _register_managed(package: str, directory: Path, progress: Callable[[str], None], *,
+                      repaired: bool) -> dict:
+    """Register Windows executables in-place; never use bare shell scripts.
+
+    Also handles a v0.16.1 installation where extraction succeeded but optional
+    Verilator registration failed. The managed content is not re-downloaded.
+    """
+    from .dependencies import DependencyConfigurationError
+    found = _scan_native_tools(directory, package, progress)
+    receipt_path = directory / 'picads_install_receipt.json'
+    try:
+        receipt = json.loads(receipt_path.read_text(encoding='utf-8'))
+    except (OSError, ValueError, TypeError) as exc:
+        raise PackageInstallError(f'Missing/corrupt managed install receipt: {receipt_path}') from exc
+    if not isinstance(receipt, dict) or receipt.get('package') != package:
+        raise PackageInstallError('Managed installation receipt is not for '+package)
+    registered = {}
+    # Essential tools first: don't claim success unless every core tool can be
+    # registered in the actual platform registry.
+    for tool in (*_required_tools(package), *(t for t in found if t not in _required_tools(package))):
+        if tool not in found:
+            continue
+        try:
+            status = register_tool(tool, directory / found[tool], 'app')
+        except (DependencyConfigurationError, OSError) as exc:
+            if tool in _required_tools(package):
+                raise PackageInstallError(f'Cannot register required Windows tool {tool}: {exc}') from exc
+            progress(f'Optional {tool}: registration unavailable ({exc}); skipped')
+            continue
+        registered[tool] = status['path']
+    receipt['resolved_tools'] = {t: str(found[t]) for t in registered}
+    receipt['registration_schema'] = 2
+    temp_receipt = receipt_path.with_suffix('.json.tmp')
+    try:
+        temp_receipt.write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
+        temp_receipt.replace(receipt_path)
+    finally:
+        temp_receipt.unlink(missing_ok=True)
+    verb = 'Recovered existing' if repaired else 'Installed'
+    progress(f'{verb} {package} at {directory}; registered {len(registered)} Windows launchers (no download during recovery)')
+    return {'status': 'INSTALLED', 'package': package, 'directory': str(directory),
+            'tools': registered, 'repaired': repaired,
+            'sha256': receipt.get('sha256'),
+            'upstream_digest_checked': receipt.get('upstream_digest_checked', False)}
 
 
 def install_package(package: str, *, progress: Callable[[str], None] | None = None,
                     asset_override: dict | None = None) -> dict:
-    """Install an explicitly selected Windows portable package. No execution of downloaded binaries.
+    """Install an explicitly selected tool or safely repair a managed package.
 
-    asset_override is reserved for offline tests; caller must provide expected
-    source URL and archive and is not exposed in GUI/CLI.
+    Repair is entirely offline and never executes a downloaded shell script.
+    asset_override is used only by offline tests.
     """
     progress = progress or (lambda msg: None)
-    if package not in PACKAGES:raise PackageInstallError('Unknown package: '+package)
+    if package not in PACKAGES:
+        raise PackageInstallError('Unknown package: '+package)
     if package in ('kicad', 'librelane'):
         from .windows_optional_install import install_kicad, stage_librelane
         root = dependency_root()
         return install_kicad(root, progress) if package == 'kicad' else stage_librelane(root, progress)
     if PACKAGES[package]['mode'] != 'portable':
-        raise PackageInstallError(f'{package} has no approved native portable Windows package. See {PACKAGES[package]["source"]}')
-    if sys.platform != 'win32' and asset_override is None:
-        raise PackageInstallError('Native Windows packages can only be installed on Windows')
-    asset = asset_override or (_oss_asset() if package == 'oss-cad-suite' else _klayout_asset())
+        raise PackageInstallError(f'{package} has no approved portable package')
     root = dependency_root()
     root.mkdir(parents=True, exist_ok=True)
     final = root / package
     if final.exists():
-        raise PackageInstallError(f'{final} already exists. Existing installations are preserved. Remove it deliberately before reinstalling.')
+        receipt = final / 'picads_install_receipt.json'
+        if not receipt.is_file():
+            raise PackageInstallError(f'{final} already exists without a valid PICADS receipt. '
+                                      'Preserved without modification; choose an app/folder manually or inspect it.')
+        progress(f'Reusing existing extracted {package} at {final}; skipping download and extraction')
+        return _register_managed(package, final, progress, repaired=True)
+    if sys.platform != 'win32' and asset_override is None:
+        raise PackageInstallError('Native Windows packages can only be installed on Windows')
+    asset = asset_override or (_oss_asset() if package == 'oss-cad-suite' else _klayout_asset())
     progress(f'Selected {package} ({asset["name"]}) from {asset["url"]}')
     with tempfile.TemporaryDirectory(prefix='.picads-install-', dir=root) as scratch:
         temp = Path(scratch)
         archive = temp / ('download.zip' if asset['name'].lower().endswith('.zip') else 'download.tar.gz')
         sha256 = _download(asset, archive, progress)
-        extracted = temp / 'extracted';extracted.mkdir()
+        extracted = temp / 'extracted'; extracted.mkdir()
         count = _extract(archive, extracted, progress)
-        found = {}
-        # Essential binaries are mandatory; optional binaries remain discoverable.
-        necessary = ('yosys', 'iverilog', 'vvp') if package == 'oss-cad-suite' else ('klayout',)
-        for tool in PACKAGES[package]['tools']:
-            executable = _find_binary(extracted, tool)
-            if executable:found[tool] = executable.relative_to(extracted)
-        missing = set(necessary) - set(found)
-        if missing:raise PackageInstallError('Archive lacks required Windows executables: '+', '.join(sorted(missing)))
+        found = _scan_native_tools(extracted, package, progress)
         receipt = {'package': package, 'upstream_url': asset['url'], 'release': asset['version'],
                    'sha256': sha256, 'upstream_digest_checked': bool(asset.get('digest')),
-                   'files': count, 'resolved_tools': {t: str(v) for t,v in found.items()},
+                   'files': count, 'resolved_tools': {t: str(v) for t, v in found.items()},
                    'note': 'Native Windows installer; no Linux runtime or installer scripts executed.'}
         (extracted / 'picads_install_receipt.json').write_text(json.dumps(receipt, indent=2)+'\n', encoding='utf-8')
         extracted.replace(final)
-    registered = {}
-    for tool, relative in found.items():
-        status = register_tool(tool, final / relative, 'app')
-        registered[tool] = status['path']
-    progress(f'Installed {package} in {final}, registered {len(registered)} executables')
-    return {'status':'INSTALLED','package':package, 'directory':str(final), 'tools':registered, 'sha256':sha256,
-            'upstream_digest_checked':bool(asset.get('digest'))}
+    # In the unlikely event that registration fails, the archive remains
+    # intact with a receipt: the user can retry offline, avoiding a 2GB loss.
+    return _register_managed(package, final, progress, repaired=False)
+
+
+def repair_package(package: str, *, progress: Callable[[str], None] | None = None) -> dict:
+    """Offline-only managed Windows package recovery; never downloads anything.
+
+    Intended for reinstalling registry paths when a prior installation has
+    already downloaded/extracted OSS CAD Suite or KLayout. No existing files
+    are deleted, overwritten (except PICADS's receipt), or executed.
+    """
+    if package not in PACKAGES or PACKAGES[package]['mode'] != 'portable':
+        raise PackageInstallError('Offline repair is supported for portable OSS CAD Suite and KLayout only')
+    directory = dependency_root() / package
+    if not directory.is_dir() or not (directory / 'picads_install_receipt.json').is_file():
+        raise PackageInstallError(f'No PICADS-managed extracted {package} found at {directory}; offline repair cannot proceed')
+    progress = progress or (lambda msg: None)
+    progress(f'Offline repair: reusing {directory}; no network access or extraction')
+    return _register_managed(package, directory, progress, repaired=True)
 
 
 def install_selected(packages: list[str], *, progress: Callable[[str], None] | None = None) -> dict:

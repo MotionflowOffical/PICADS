@@ -1,23 +1,19 @@
 {
   "product": "PICADS",
-  "version": "0.16.1",
+  "version": "0.16.2",
   "format": "flat cumulative source ZIP",
   "changes": [
-    "KiCad checkbox enabled, official WinGet installation with preferred dependency folder and verified registration",
-    "LibreLane checkbox enabled, guided optional WSL2/Docker/Ubuntu setup console with smoke-test marker",
-    "Settings user confirmation for WSL/Docker setup and accurate partial status",
-    "Updated CLI installer support, regression tests, versioned diagnostics launchers and documentation"
+    "Fixed OSS CAD Suite Windows install failure on optional extensionless Verilator script",
+    "Windows registration now selects executable launchers only; optional script entry points safely skipped",
+    "Offline recovery of previously extracted managed bundles without downloading another 544 MiB archive",
+    "Added one-click REPAIR_OSS_CAD_WINDOWS.bat and CLI dependencies repair",
+    "Existing KiCad and user projects retained; unknown installations never overwritten"
   ],
   "verification": {
-    "selected_regression_group": "216 passed, 0 failed (specific listed test groups)",
-    "focused_optional_install": "25 passed, 1 GUI test skipped",
-    "qt_runtime": "UNVERIFIED: no PySide6",
-    "real_winget_install": "UNVERIFIED: no Windows host available",
-    "real_wsl_docker_librelane_setup": "UNVERIFIED: no Windows host available",
-    "complete_historical_regression": "INCOMPLETE: large combined run timed out",
-    "manufacturing_signoff": "NOT_IMPLEMENTED"
+    "targeted_python": "90 passed, 1 skipped",
+    "windows_real_execution": "NOT RUN in Linux test environment",
+    "full_regression": "PENDING; do not infer from targeted tests",
+    "manufacturing_signoff": "NOT IMPLEMENTED"
   },
-  "bundled_external_binaries": false,
-  "caution": "Native KiCad installation depends on WinGet and may ignore requested folder; LibreLane installation is guided and requires real Windows and WSL2/Docker validation.",
-  "files_excluding_hash_manifest": 271
+  "external_binaries_included": false
 }

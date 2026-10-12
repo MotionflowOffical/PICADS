@@ -53,8 +53,9 @@ def test_native_portable_windows_bundle_installs_only_selected(tmp_path,monkeypa
     assert Path(resolve_tool('vvp')).name=='vvp.exe'
     assert json.loads((root/'oss-cad-suite/picads_install_receipt.json').read_text())['upstream_digest_checked'] is False
     assert not (root/'klayout').exists()
-    with pytest.raises(wi.PackageInstallError,match='already exists'):
-        wi.install_package('oss-cad-suite',asset_override=_asset())
+    # Reinstallation after a completed extraction is an offline registration repair.
+    second=wi.install_package('oss-cad-suite',asset_override=_asset())
+    assert second['status']=='INSTALLED' and second['repaired'] is True
 
 
 def test_install_rejects_archive_traversal(tmp_path):
@@ -199,7 +200,7 @@ def test_install_catalog_respects_optional_binaries_and_managed_paths(tmp_path, 
     }))
     catalog = {r['id']: r for r in wi.install_catalog()}
     assert catalog['oss-cad-suite']['installed'] is True
-    assert catalog['oss-cad-suite']['can_install'] is False
+    assert catalog['oss-cad-suite']['can_install'] and catalog['oss-cad-suite']['can_repair']
     assert catalog['klayout']['installed'] is False
     assert catalog['klayout']['can_install'] is True
     assert catalog['librelane']['can_install'] is True
@@ -210,7 +211,7 @@ def test_install_catalog_respects_optional_binaries_and_managed_paths(tmp_path, 
     state = {r['id']: r for r in wi.install_catalog()}['oss-cad-suite']
     assert not state['installed']
     assert state['managed_path_exists']
-    assert not state['can_install']
+    assert state['can_repair']  # repair offered; missing essential remains an error
 
 
 def test_klayout_native_windows_archive_registers_klayout_app(tmp_path, monkeypatch):
@@ -236,4 +237,106 @@ def test_klayout_native_windows_archive_registers_klayout_app(tmp_path, monkeypa
     assert Path(resolve_tool('klayout')).name == 'klayout_app.exe'
     assert (tmp_path / 'dependencies' / 'klayout' / 'picads_install_receipt.json').exists()
     status = {r['id']: r for r in wi.install_catalog()}['klayout']
-    assert status['installed'] and not status['can_install']
+    assert status['installed'] and status['can_repair']
+
+
+def test_mixed_windows_and_posix_executables_are_registered_safely(monkeypatch,tmp_path):
+    """Regression for the real v0.16.1 failure: extensionless verilator."""
+    from chipcompiler import dependencies
+    monkeypatch.setenv('PICADS_DEPENDENCY_ROOT',str(tmp_path/'dependencies'))
+    monkeypatch.setenv('PICADS_SETTINGS_DIR',str(tmp_path/'settings'))
+    monkeypatch.setattr(dependencies,'_executable',lambda p:p.is_file() and p.suffix.lower() in ('.exe','.bat','.cmd'))
+    archive=tmp_path/'bundle.zip'
+    _fake_zip(archive,{
+        'oss-cad-suite/bin/yosys':b'#!/bin/sh\necho shell-only',
+        'oss-cad-suite/bin/yosys.exe':b'fake windows exe',
+        'oss-cad-suite/bin/iverilog.exe':b'fake windows exe',
+        'oss-cad-suite/bin/vvp.exe':b'fake windows exe',
+        'oss-cad-suite/bin/verilator':b'#!/bin/sh\nexec perl verilator',
+        'oss-cad-suite/bin/sby':b'#!/usr/bin/env python\nprint(1)',
+        'oss-cad-suite/bin/z3.exe':b'fake native binary',
+    })
+    def fake_download(asset,path,progress):
+        import shutil
+        shutil.copyfile(archive,path)
+        return 'a'*64
+    monkeypatch.setattr(wi,'_download',fake_download)
+    logs=[]
+    result=wi.install_package('oss-cad-suite',asset_override=_asset(),progress=logs.append)
+    assert result['status']=='INSTALLED'
+    assert result['repaired'] is False
+    assert set(result['tools']) == {'yosys','iverilog','vvp','z3'}
+    assert 'verilator' not in result['tools']
+    assert 'sby' not in result['tools']
+    assert result['tools']['yosys'].endswith('yosys.exe')
+    assert (tmp_path/'dependencies/oss-cad-suite/oss-cad-suite/bin/verilator').is_file()
+    assert any('Optional verilator' in line for line in logs)
+    data=json.loads((tmp_path/'dependencies/oss-cad-suite/picads_install_receipt.json').read_text())
+    assert 'verilator' not in data['resolved_tools']
+
+
+def test_regression_v0161_failure_recovers_without_network_or_reextract(monkeypatch,tmp_path):
+    """Recover a 2GB suite that extracted but crashed registering 'verilator'."""
+    from chipcompiler import dependencies
+    monkeypatch.setenv('PICADS_DEPENDENCY_ROOT',str(tmp_path/'dependencies'))
+    monkeypatch.setenv('PICADS_SETTINGS_DIR',str(tmp_path/'settings'))
+    monkeypatch.setattr(dependencies,'_executable',lambda p:p.is_file() and p.suffix.lower()=='.exe')
+    directory=tmp_path/'dependencies/oss-cad-suite'
+    binaries=directory/'oss-cad-suite/bin'
+    binaries.mkdir(parents=True)
+    for name in ('yosys.exe','iverilog.exe','vvp.exe'):
+        (binaries/name).write_bytes(b'valid-shape')
+    (binaries/'verilator').write_text('#!/bin/bash')
+    marker=directory/'existing-user-data.txt'
+    marker.write_text('do not remove')
+    # This receipt mirrors the one v0.16.1 wrote just before failing.
+    (directory/'picads_install_receipt.json').write_text(json.dumps({
+        'package':'oss-cad-suite', 'sha256':'4fc9a33e9c96329cb0bb82ec56631452a0d279dcda1a5a20a96fc19c7a097ce2',
+        'resolved_tools':{'yosys':'oss-cad-suite/bin/yosys.exe',
+                          'iverilog':'oss-cad-suite/bin/iverilog.exe',
+                          'vvp':'oss-cad-suite/bin/vvp.exe',
+                          'verilator':'oss-cad-suite/bin/verilator'}}))
+    def never_download(*_args,**_kwargs):
+        raise AssertionError('OFFLINE repair attempted to download')
+    monkeypatch.setattr(wi,'_download',never_download)
+    monkeypatch.setattr(wi,'_oss_asset',never_download)
+    logs=[]
+    state=wi.install_catalog()[0]
+    assert state['can_repair'] and state['can_install']
+    result=wi.install_package('oss-cad-suite',progress=logs.append)
+    assert result['status']=='INSTALLED' and result['repaired'] is True
+    assert set(result['tools']) == {'yosys','iverilog','vvp'}
+    assert marker.read_text()=='do not remove'
+    assert (binaries/'verilator').read_text()=='#!/bin/bash'
+    receipt=json.loads((directory/'picads_install_receipt.json').read_text())
+    assert 'verilator' not in receipt['resolved_tools']
+    assert len(list(directory.rglob('*'))) >= 6
+    assert 'no download' in ' '.join(logs).lower()
+    assert wi.repair_package('oss-cad-suite')['repaired'] is True
+
+
+def test_explicit_offline_repair_refuses_missing_package(monkeypatch,tmp_path):
+    monkeypatch.setenv('PICADS_DEPENDENCY_ROOT',str(tmp_path/'dependencies'))
+    with pytest.raises(wi.PackageInstallError,match='No PICADS-managed'):
+        wi.repair_package('oss-cad-suite')
+    assert not (tmp_path/'dependencies/oss-cad-suite').exists()
+
+
+def test_unknown_occupied_directory_never_overwritten(monkeypatch,tmp_path):
+    monkeypatch.setenv('PICADS_DEPENDENCY_ROOT',str(tmp_path/'dependencies'))
+    directory=tmp_path/'dependencies/oss-cad-suite'
+    directory.mkdir(parents=True)
+    (directory/'valuable.txt').write_text('remain untouched')
+    with pytest.raises(wi.PackageInstallError,match='without a valid PICADS receipt'):
+        wi.install_package('oss-cad-suite',asset_override=_asset())
+    assert (directory/'valuable.txt').read_text()=='remain untouched'
+
+
+def test_offline_repair_cli_is_exposed():
+    from chipcompiler.cli import main
+    import contextlib
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc=main(['dependencies','repair','oss-cad-suite'])
+    # In the test environment the default managed package is absent; verify
+    # command parsing and structured error status rather than downloading.
+    assert rc != 0

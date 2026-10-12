@@ -188,7 +188,7 @@ class WindowsInstallerDialog(QDialog):
         layout = QVBoxLayout(self)
         heading = QLabel('Install optional Windows EDA tools')
         heading.setObjectName('section'); layout.addWidget(heading)
-        explanation = QLabel('Only checked packages will be downloaded. Files are kept in '+
+        explanation = QLabel('Only checked packages will be installed or repaired. Existing managed downloads are reused. Files are kept in '+
                              str(dependency_root())+' and registered automatically. '
                              'PICADS itself does not require any external EDA tools to compile or simulate DLS.')
         explanation.setWordWrap(True); layout.addWidget(explanation)
@@ -201,8 +201,12 @@ class WindowsInstallerDialog(QDialog):
             layout.addWidget(check)
             if spec['installed'] and spec['id']=='librelane':
                 status = 'WSL smoke-test marker present; complete PICADS backend configuration'
+            elif spec.get('can_repair') and spec['installed']:
+                status = 'installed; select to repair/refresh tool registration without downloading again'
             elif spec['installed']:
                 status = 'installed / registered with PICADS'
+            elif spec.get('can_repair'):
+                status = 'extracted bundle; select to recover registration without downloading again'
             elif spec['managed_path_exists'] and spec['mode']=='portable':
                 status = 'existing managed directory needs inspection; will not overwrite'
             elif spec['mode'] == 'portable':
@@ -244,7 +248,7 @@ class WindowsInstallerDialog(QDialog):
         self.install_button.setEnabled(False)
         for box in self.choices.values():box.setEnabled(False)
         self.progress.setRange(0,0)
-        self.log.appendPlainText('Starting explicit installation: '+', '.join(selected))
+        self.log.appendPlainText('Starting explicit installation or repair: '+', '.join(selected))
         self.worker = WindowsInstallWorker(selected)
         self.worker.progress_message.connect(self.log.appendPlainText)
         self.worker.completed.connect(self.finished_install)
