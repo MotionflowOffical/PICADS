@@ -137,7 +137,10 @@ def test_native_macro_full_layout_mock_requires_actual_def_gds(tmp_path,monkeypa
             name=stage[6:]
             _fake_gds(run/'final/gds'/f'{name}.gds',name,[])
             (run/'final/lef').mkdir(parents=True,exist_ok=True)
-            (run/'final/lef'/f'{name}.lef').write_text(f'MACRO {name}\n SIZE 60 BY 80 ;\nEND {name}\n')
+            (run/'final/lef'/f'{name}.lef').write_text((f'MACRO {name}\n SIZE 60 BY 80 ;\n'
+                     ' PIN VPWR\n USE POWER ;\n PORT\n LAYER met4 ;\n RECT 10 10 11 50 ;\n END\n END VPWR\n'
+                     ' PIN VGND\n USE GROUND ;\n PORT\n LAYER met4 ;\n RECT 15 10 16 50 ;\n END\n END VGND\n'
+                     f'END {name}\n'))
             (run/'final/nl').mkdir(parents=True,exist_ok=True)
             (run/'final/nl'/f'{name}.nl.v').write_text(f'module {name}(); endmodule')
         elif stage=='physical':
@@ -156,8 +159,15 @@ def test_native_macro_full_layout_mock_requires_actual_def_gds(tmp_path,monkeypa
     assert result.stages['physical']['status']=='PASS',result.as_dict()
     assert result.stages['physical']['macro_placement']=='MACRO_GDS_AND_DEF_PLACEMENT_VERIFIED'
     assert set(calls)>={'macro_tiny8_memory','macro_tiny8_control','macro_tiny8_alu','physical'}
+    parent=json.loads((folder/'build/latest/config.json').read_text())
+    assert parent['PDN_MULTILAYER'] is True
+    assert 25 <= parent['PDN_HPITCH'] <= 80
+    assert 25 <= parent['PDN_VPITCH'] <= 80
     for stage,argv in commands:
         if stage.startswith('macro_'):
+            child=json.loads((folder/'build/co_macro_cache'/stage[6:]/'config.json').read_text())
+            assert child['PDN_MULTILAYER'] is False
+            assert child['PDN_ENABLE_PINS'] is True
             assert argv[-3:] == ['--to','Magic.WriteLEF','config.json']
         elif stage == 'physical':
             assert argv[-3:] == ['--to','KLayout.StreamOut','config.json']
@@ -253,3 +263,28 @@ def test_macro_xor_failure_remains_blocking_at_verification(tmp_path, monkeypatc
         {'macro_children':[receipt]}, {'pdk':'sky130A'}, {'runner':'wsl'})
     assert session.stages['macro_signoff']['status']=='FAIL'
     assert any(i.code=='VERIFY.MACRO_SIGNOFF_FAILED' for i in session.issues.issues)
+
+
+def test_native_macro_lef_requires_exposed_power_geometry(tmp_path):
+    from chipcompiler.co_macros import inspect_macro_lef_power
+    example = ("MACRO alu\n SIZE 60 BY 80 ;\n"
+               "PIN VPWR\n USE POWER ; PORT LAYER met4 ; RECT 1 2 3 4 ; END END VPWR\n"
+               "PIN VGND\n USE GROUND ; PORT LAYER met4 ; RECT 5 6 7 8 ; END END VGND\n"
+               "END alu\n")
+    lef = tmp_path / 'alu.lef'
+    lef.write_text(example)
+    assert inspect_macro_lef_power(lef, 'alu')['VPWR']['layers'] == ['met4']
+    lef.write_text(example.replace('USE GROUND','USE SIGNAL'))
+    with pytest.raises(MacroConstraintError, match='VGND'):
+        inspect_macro_lef_power(lef, 'alu')
+
+
+def test_pdn_diagnostics_identify_disconnected_power_without_disabling_checks(tmp_path):
+    from chipcompiler.co_macros import collect_pdn_errors
+    log=tmp_path/'physical.log'
+    log.write_text('[STDOUT] [PSM-0039] Unconnected instance u_alu/VPWR\n'
+                   '[STDOUT] [PDN-0110] No via inserted between met4 and met5\n'
+                   '[STDOUT] [PSM-0069] Check connectivity failed on VPWR\n')
+    result=collect_pdn_errors(log)
+    assert result['status']=='PDN_CONNECTIVITY_SUSPECT'
+    assert {x['code'] for x in result['findings']} == {'PSM-0039','PDN-0110','PSM-0069'}

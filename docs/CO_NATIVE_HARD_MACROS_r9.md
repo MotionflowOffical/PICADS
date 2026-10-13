@@ -73,3 +73,7 @@ The generated GDS is **not** a certified mask and passing structural placement c
 - The test suite includes a mocked complete CO-to-DEF/GDS run with actual structural checks. It does not demonstrate a physically routed SKY130 device. A first live Linux/WSL run is required to validate the integration and tweak PDK-specific macro hooks if necessary.
 
 **Important:** Deferred `1 XOR differences found` is a Magic-vs-KLayout *GDS geometry comparison* failure, not an ALU logic-equivalence proof or failure. Layout generation can succeed while this issue remains. The underlying discrepancy must still be investigated before a mask is considered verified.
+
+## r9b hierarchical PDN correction
+
+Submacro hardening now explicitly sets `PDN_MULTILAYER: false` and `PDN_ENABLE_PINS: true`; the parent sets `PDN_MULTILAYER: true` and power-strap pitches chosen relative to the smallest macro dimensions. All macro LEF views must expose `VPWR`/`VGND` physical pin geometry. A failed top run writes `co_macros/pdn_diagnostics.json`. Do not claim signoff if the top-level grid is disconnected.
