@@ -44,7 +44,7 @@ def normalize_physical_settings(settings: dict, clocked: bool) -> tuple[dict, di
     if not isinstance(settings, dict):
         raise ValueError('PHYSICAL.CONFIG_FORMAT: physical must be a YAML mapping')
     allowed = {'enabled', 'pdk', 'pdk_root', 'std_cell_library', 'dockerized', 'timeout_s',
-               'clock_period_ns', 'core_utilization', 'die_area_um', 'placement_density', 'power_grid'}
+               'clock_period_ns', 'core_utilization', 'die_area_um', 'core_area_um', 'placement_density', 'power_grid'}
     unknown = set(settings) - allowed
     if unknown:
         raise ValueError('PHYSICAL.CONFIG_UNKNOWN: unsupported physical key(s): ' + ', '.join(sorted(unknown)))
@@ -78,6 +78,17 @@ def normalize_physical_settings(settings: dict, clocked: bool) -> tuple[dict, di
             raise ValueError('PHYSICAL.CONFIG_DIE_AREA: expected x0<x1 and y0<y1')
         ll['DIE_AREA'] = coords
         ll['FP_SIZING'] = 'absolute'
+    if 'core_area_um' in settings:
+        if 'die_area_um' not in settings:
+            raise ValueError('PHYSICAL.CONFIG_CORE_AREA: core_area_um requires die_area_um')
+        c = settings['core_area_um']
+        if not isinstance(c, (list, tuple)) or len(c) != 4:
+            raise ValueError('PHYSICAL.CONFIG_CORE_AREA: require [x0,y0,x1,y1]')
+        core = [_number(v,0,1000000,'core_area_um') for v in c]
+        die = ll['DIE_AREA']
+        if not (die[0] <= core[0] < core[2] <= die[2] and die[1] <= core[1] < core[3] <= die[3]):
+            raise ValueError('PHYSICAL.CONFIG_CORE_AREA: must be a positive rectangle contained inside die_area_um')
+        ll['CORE_AREA'] = core
     if 'std_cell_library' in settings:
         ll['STD_CELL_LIBRARY'] = settings['std_cell_library']
     # Standard-cell power distribution is a real routed feature, not a solid

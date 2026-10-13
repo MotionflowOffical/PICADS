@@ -31,3 +31,7 @@ floorplan:
 The planner only binds declared DLS instances to actual pre-synthesis instances and checks source functions and CO scheduled resource usage. Unused optional selectors are pruned; unused `required: true` selectors fail. The planner creates `build/latest/module_floorplan.json` and a scalable `module_floorplan.svg` with containment/border/spacing checks. The GUI Build / Physical panel can show the SVG.
 
 **Future enforced placement:** PICADS must retain source provenance through Yosys/ABC technology mapping, map each live cell to exactly one module group, integrate region constraints at the correct OpenROAD phase, and measure actual placed cell bounds and minimum/maximum separations. The current code does none of that. Static rectangles cannot be presented as already placed GDS modules.
+
+## v0.16.8r8 selective CO enforcement
+
+See [CO selective physical constraints](CO_SELECTIVE_PHYSICAL_CONSTRAINTS.md) for per-module `enforcement`, source-binding validation, and LibreLane-backed physical keepouts. Real mapped-cell module fences are **not** supported and fail explicitly if required.

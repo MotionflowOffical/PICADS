@@ -301,12 +301,14 @@ class BuildSession:
                         picture=render_floorplan_svg(planned,self.out/'module_floorplan.svg')
                         self.result.files['module_floorplan']=str(path)
                         self.result.files['module_floorplan_svg']=str(picture)
-                        self._done('floorplan','GUIDE_ONLY',module_count=len(planned['modules']),
-                                   pruned=planned['pruned'],enforcement='NOT_APPLIED_TO_PNR')
+                        self._done('floorplan','PLAN_VALIDATED' if planned['status']=='PLAN_VALIDATED_NOT_PLACED' else 'GUIDE_ONLY',
+                                   module_count=len(planned['modules']),pruned=planned['pruned'],
+                                   hard_keepouts=len([x for x in planned.get('keepouts',[]) if x['enforcement']=='required']),
+                                   enforcement='MODULES_NOT_APPLIED_TO_PNR')
                 except FloorplanError as exc:
                     issue=self.issues.add('CO.FLOORPLAN_ERROR','ERROR','CO','floorplan',str(exc),
                         cause='Requested floorplan constraints cannot be satisfied or cannot be physically enforced.',
-                        remedy='Check CO floorplan regions, spacing and module bindings. Use enforcement: guide until a cell-region EDA backend is available.')
+                        remedy='Check CO regions, selectors and keepouts; required standard-cell module fences need a proven technology-mapped cell binding backend.')
                     self._done('floorplan','FAIL',issue_id=issue.issue_id)
                     raise DiagnosticException(issue)
             # A separate functional DLS is generated for every reachable helper.
@@ -537,9 +539,21 @@ class BuildSession:
                 remedy='Verify Docker Desktop WSL integration and the selected Ubuntu distribution; rerun PICADS dependency diagnostics.',
                 evidence={k:preflight.checks[k] for k in missing_backend})
             self._done('physical','UNAVAILABLE',issue_id=i.issue_id);self._block('signoff',i);return
+        # Physical exclusions are actually enforced by LibreLane's supported
+        # floorplanner option. Do not mistake them for module fences.
+        co_physical_constraints={}
+        if 'module_floorplan' in self.result.files:
+            from .floorplanning import librelane_keepout_config
+            planned=json.loads(Path(self.result.files['module_floorplan']).read_text(encoding='utf-8'))
+            co_physical_constraints=librelane_keepout_config(planned)
+            if co_physical_constraints:
+                self._done('co_physical_constraints','SUBMITTED_NOT_VERIFIED',
+                           hard_keepouts=len(co_physical_constraints['FP_OBSTRUCTIONS']),
+                           backend='LibreLane.FP_OBSTRUCTIONS',
+                           warning='This reserves empty placement space; it does not place modules or validate the final routed DEF.')
         period=config.get('clock_period_ns')
         write_librelane_config(name, 'clk' if self.dls.requires_clock() else None,period,
-                               self.out/'config.json',extra=preflight.librelane_config)
+                               self.out/'config.json',extra={**preflight.librelane_config,**co_physical_constraints})
         # Explicit fresh run tag, preventing an earlier mask from being
         # mistaken for the result of this compilation.
         tag='cc_'+self.result.run_id
@@ -611,7 +625,7 @@ class BuildSession:
                 self._done('physical','FAIL',issue_id=i.issue_id);return
             self._done('physical','PASS',gds=evidence.gds,
                        flow_stop='KLayout.StreamOut',verification='NOT_PERFORMED',
-                       floorplan_enforcement='GUIDE_ONLY' if 'module_floorplan' in self.result.files else 'NOT_REQUESTED')
+                       floorplan_enforcement='MODULES_GUIDE_ONLY_KEEP_OUTS_SUBMITTED' if 'co_physical_constraints' in self.result.stages else 'GUIDE_ONLY' if 'module_floorplan' in self.result.files else 'NOT_REQUESTED')
             self._done('signoff','DEFERRED',reason='Select Verify Existing Layout to resume LibreLane checks')
             return
         self._done('physical','PASS',evidence=str(self.out/'physical_evidence.json'),gds=evidence.gds,

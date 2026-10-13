@@ -1,0 +1,27 @@
+architecture:
+  adder: auto
+schedule:
+  mode: spatial
+synthesis:
+  abc_aig: true
+floorplan:
+  enabled: true
+  enforcement: guide
+  region_um: [10, 10, 190, 190]
+  border_um: 8
+  min_spacing_um: 5
+  preferred_spacing_um: 10
+  max_spacing_um: 20
+  modules:
+    - name: DataRegister
+      source_function: first_chip
+      enforcement: guide
+      weight: 2
+    - name: ControlInterface
+      enforcement: guide
+      weight: 1
+  keepouts:
+    - name: ReservedChannel
+      kind: hard
+      enforcement: required
+      bounds_um: [95, 20, 105, 180]

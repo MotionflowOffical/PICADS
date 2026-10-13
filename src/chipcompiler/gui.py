@@ -13,7 +13,7 @@ from .ir import DLS
 from .waveform import export_vcd
 from .maskinspect import inspect_gds
 from .maskrender import render_gds_svg
-from .klayout_layers import acquire_lyp, klayout_open_argv
+from .klayout_layers import acquire_lyp, klayout_open_argv, named_sky130_palette
 from .dependencies import TOOLS, tool_status, register_tool, unregister_tool, settings_file, resolve_tool, dependency_environment, auto_detect_all
 from .pdk import pdk_status, register_pdk, clear_pdk
 from .windows_installer import install_selected, install_catalog, dependency_root
@@ -1093,10 +1093,17 @@ class Window(QMainWindow):
             palette=acquire_lyp(self.root,pdk=physical.get('pdk','sky130A'),
                                 pdk_root=physical.get('pdk_root'),
                                 distribution=tool.get('wsl_distribution','Ubuntu'))
+            coverage = None
+            if palette and str(physical.get('pdk','sky130A')).lower().startswith('sky130'):
+                palette, coverage = named_sky130_palette(palette,gds,project=self.root)
             subprocess.Popen(klayout_open_argv(viewer,gds,palette=palette),
                              env=dependency_environment(tool='klayout'))
             if not palette:
                 self.statusBar().showMessage('KLayout opened, but no PDK .lyp layer palette was found. Select SKY130 technology in KLayout.')
+            elif coverage:
+                extra = len(coverage.get('unmapped_pairs',[]))
+                self.statusBar().showMessage('KLayout opened with verified SKY130 layer names.' +
+                    (f' {extra} unrecognized layer/datatype pairs are retained numerically.' if extra else ' All identified pairs mapped.'))
         except (OSError,ValueError) as exc:
             QMessageBox.warning(self,'KLayout launch failed',str(exc))
 

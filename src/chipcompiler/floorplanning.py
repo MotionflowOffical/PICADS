@@ -81,9 +81,12 @@ def _build_spec(raw, context, ancestors=(), names=None):
         raise FloorplanError('CO.FLOORPLAN_INVALID: every module must be a mapping')
     unknown = set(raw)-{'name','source_function','instance','resource','weight','modules','required',
                         'min_spacing_um','max_spacing_um','preferred_spacing_um','border_um',
-                        'min_width_um','min_height_um'}
+                        'min_width_um','min_height_um','enforcement'}
     if unknown:
         raise FloorplanError('CO.FLOORPLAN_UNKNOWN: unsupported module fields: '+', '.join(sorted(unknown)))
+    mode = raw.get('enforcement', context['default_enforcement'])
+    if mode not in ('guide','validate','required'):
+        raise FloorplanError('CO.FLOORPLAN_ENFORCEMENT: module enforcement must be guide, validate or required')
     name = raw.get('name')
     if not isinstance(name,str) or not _NAME.fullmatch(name):
         raise FloorplanError('CO.FLOORPLAN_INVALID: module name must be a simple hardware identifier')
@@ -107,7 +110,7 @@ def _build_spec(raw, context, ancestors=(), names=None):
     if 'resource' in raw and context['resources'].get(raw['resource'],0)==0:
         reason='resource was not allocated by CO'
     if reason:
-        if raw.get('required',False):
+        if raw.get('required',False) or mode != 'guide':
             raise FloorplanError('CO.FLOORPLAN_REQUIRED: '+path+': '+reason)
         context['pruned'].append({'module':path,'reason':reason})
         return None
@@ -129,7 +132,11 @@ def _build_spec(raw, context, ancestors=(), names=None):
         binding='CO_RESOURCE_NOT_CELL_MAPPED'
     else:
         binding='DESCRIPTIVE_ONLY'
-    return {'name':name,'path':path,'selector':{key:raw[key] for key in selectors},'binding':binding,
+    if mode == 'validate' and binding != 'DLS_INSTANCE_PRE_SYNTHESIS':
+        raise FloorplanError('CO.FLOORPLAN_VALIDATION_UNBOUND: '+path+' needs a real DLS instance path to validate')
+    if mode == 'required':
+        raise FloorplanError('CO.FLOORPLAN_ENFORCEMENT_UNSUPPORTED: '+path+': required cell placement needs technology-mapped instance provenance and a verified placement-region backend; PICADS cannot enforce it yet')
+    return {'name':name,'path':path,'selector':{key:raw[key] for key in selectors},'binding':binding,'enforcement':mode,
             'weight':weight,'min_width_um':width,'min_height_um':height,'settings':raw,'children':selected}
 
 
@@ -155,6 +162,61 @@ def _split(node_list, rect, gap):
     return _split(a,ra,gap)+_split(b,rb,gap)
 
 
+def _parse_keepouts(keepouts, region, physical):
+    """Independent CO placement exclusions; never confuse with module fences.
+
+    FP_OBSTRUCTIONS are supported by LibreLane. A hard keepout forbids
+    standard-cell placement throughout the rectangle; it does NOT assign
+    any module to a different rectangle. A soft keepout only influences
+    initial placement and cannot be classified as a hard guarantee.
+    """
+    if not isinstance(keepouts,list):
+        raise FloorplanError('CO.FLOORPLAN_KEEPOUT_FORMAT: keepouts must be a list')
+    result=[];names=set()
+    for i,entry in enumerate(keepouts):
+        if not isinstance(entry,dict) or set(entry)-{'name','bounds_um','kind','enforcement'}:
+            raise FloorplanError('CO.FLOORPLAN_KEEPOUT_FORMAT: keepout requires name, bounds_um, kind and enforcement only')
+        name=entry.get('name')
+        if not isinstance(name,str) or not _NAME.fullmatch(name) or name in names:
+            raise FloorplanError('CO.FLOORPLAN_KEEPOUT_NAME: unique hardware identifier required')
+        names.add(name)
+        bounds=_rectangle(entry.get('bounds_um'),f'floorplan.keepouts[{i}].bounds_um')
+        if not _inside(bounds,region):
+            raise FloorplanError('CO.FLOORPLAN_KEEPOUT_BOUNDS: '+name+' is outside floorplan region')
+        kind=entry.get('kind','hard')
+        enforcement=entry.get('enforcement','guide')
+        if kind not in ('hard','soft') or enforcement not in ('guide','required'):
+            raise FloorplanError('CO.FLOORPLAN_KEEPOUT_MODE: kind must be hard/soft; enforcement guide/required')
+        if enforcement=='required':
+            if kind=='soft':
+                raise FloorplanError('CO.FLOORPLAN_SOFT_NOT_HARD: soft obstructions cannot guarantee empty space')
+            die=physical.get('die_area_um')
+            if die is None or not _inside(bounds,_rectangle(die,'physical.die_area_um')):
+                raise FloorplanError('CO.FLOORPLAN_KEEPOUT_DIE: hard keepouts require explicit physical.die_area_um containing the region')
+            if not physical.get('enabled',False):
+                raise FloorplanError('CO.FLOORPLAN_KEEPOUT_PHYSICAL_DISABLED: physical.enabled must be true for enforced keepouts')
+        result.append({'name':name,'bounds_um':bounds,'kind':kind,'enforcement':enforcement,
+                       'status':'CONFIG_READY_NOT_YET_PLACED' if enforcement=='required' else 'GUIDE_ONLY'})
+    hard=[r for r in result if r['kind']=='hard' and r['enforcement']=='required']
+    for i,a in enumerate(hard):
+        for b in hard[i+1:]:
+            x0=max(a['bounds_um'][0],b['bounds_um'][0]);x1=min(a['bounds_um'][2],b['bounds_um'][2])
+            y0=max(a['bounds_um'][1],b['bounds_um'][1]);y1=min(a['bounds_um'][3],b['bounds_um'][3])
+            if x1>x0 and y1>y0:
+                raise FloorplanError('CO.FLOORPLAN_KEEPOUT_OVERLAP: '+a['name']+' and '+b['name'])
+    return result
+
+
+def librelane_keepout_config(plan):
+    """Translate only explicit, hard, requested CO exclusions to LL.
+
+    Individual regions are NOT module fences. This translation is supported by
+    LibreLane's FP_OBSTRUCTIONS, independent of technology-mapped cell names.
+    """
+    hard=[x['bounds_um'] for x in plan.get('keepouts',[]) if x['enforcement']=='required' and x['kind']=='hard']
+    return {'FP_OBSTRUCTIONS':hard} if hard else {}
+
+
 def plan_floorplan(settings, dls, architecture, co=None, physical=None):
     """Return a checked, source-connected logical-region plan in micrometers.
 
@@ -164,16 +226,14 @@ def plan_floorplan(settings, dls, architecture, co=None, physical=None):
     if not isinstance(settings,dict):
         raise FloorplanError('CO.FLOORPLAN_INVALID: floorplan must be a mapping')
     allowed={'enabled','enforcement','region_um','min_spacing_um','max_spacing_um',
-             'preferred_spacing_um','border_um','modules'}
+             'preferred_spacing_um','border_um','modules','keepouts'}
     unknown=set(settings)-allowed
     if unknown:
         raise FloorplanError('CO.FLOORPLAN_UNKNOWN: '+', '.join(sorted(unknown)))
     if type(settings.get('enabled',True)) is not bool:
         raise FloorplanError('CO.FLOORPLAN_INVALID: enabled must be boolean')
-    if settings.get('enforcement','guide') not in ('guide','required'):
-        raise FloorplanError('CO.FLOORPLAN_INVALID: enforcement must be guide or required')
-    if settings.get('enforcement')=='required':
-        raise FloorplanError('CO.FLOORPLAN_ENFORCEMENT_UNSUPPORTED: exact standard-cell fence enforcement needs a mapped instance-to-region backend, which PICADS does not yet have. Use enforcement: guide to visualize without claiming physical placement.')
+    if settings.get('enforcement','guide') not in ('guide','validate','required'):
+        raise FloorplanError('CO.FLOORPLAN_INVALID: enforcement must be guide, validate or required')
     p = physical or {}
     if 'region_um' in settings:
         region=_rectangle(settings['region_um'],'floorplan.region_um')
@@ -189,7 +249,7 @@ def plan_floorplan(settings, dls, architecture, co=None, physical=None):
     schedule=(dls.metadata.get('schedule') or {})
     resources=schedule.get('physical_units') or dls.metadata.get('operator_counts') or {}
     context={'reachable':set(architecture.reachable),'instances':instances,'resources':resources,
-             'pruned':[], 'names':set()}
+             'pruned':[], 'names':set(), 'default_enforcement':settings.get('enforcement','guide')}
     modules=settings.get('modules')
     if modules is None:modules=_default_modules(dls, architecture)
     if not isinstance(modules,list) or not modules:
@@ -210,13 +270,15 @@ def plan_floorplan(settings, dls, architecture, co=None, physical=None):
             if r[2]-r[0]+1e-8<n['min_width_um'] or r[3]-r[1]+1e-8<n['min_height_um']:
                 raise FloorplanError('CO.FLOORPLAN_TOO_SMALL: '+n['path']+' violates minimum module dimensions')
             record={'name':n['name'],'path':n['path'],'parent':parent,'bounds_um':[round(x,6) for x in r],
-                    'binding':n['binding'],'selector':n['selector'],'weight':n['weight'],'children':[ch['path'] for ch in n['children']]}
+                    'binding':n['binding'],'enforcement':n['enforcement'],'selector':n['selector'],'weight':n['weight'],'children':[ch['path'] for ch in n['children']]}
             result.append(record)
             if n['children']:
                 place(n['children'],r,n['settings'],n['path'])
     place(roots,region,settings)
-    return {'schema':1,'status':'GUIDE_ONLY_NOT_ENFORCED','units':'um',
-            'region_um':region,'modules':result,'pruned':context['pruned'],
+    exclusions=_parse_keepouts(settings.get('keepouts',[]),region,p)
+    validated=any(m['enforcement']=='validate' for m in result)
+    return {'schema':2,'status':'PLAN_VALIDATED_NOT_PLACED' if validated else 'GUIDE_ONLY_NOT_ENFORCED','units':'um',
+            'region_um':region,'modules':result,'keepouts':exclusions,'pruned':context['pruned'],
             'min_spacing_um':defaults['min_spacing_um'], 'max_spacing_um':defaults['max_spacing_um'],
             'preferred_spacing_um':defaults['preferred_spacing_um'],
             'actual_dls_instances':instances,'allocated_operator_resources':resources,
@@ -240,6 +302,10 @@ def render_floorplan_svg(plan, target):
         font=min((c-a)/max(len(item['name'])*0.65,1), (d-b)/3, min(w,h)/45)
         if font>0.5:
             lines.append(f'<text x="{a+(c-a)/2}" y="{b+(d-b)/2}" font-size="{font}" fill="#172554" text-anchor="middle" font-family="sans-serif">{escape(item["name"])}</text>')
+    for item in plan.get('keepouts',[]):
+        a,b,c,d=item['bounds_um']
+        stroke='#b91c1c' if item['enforcement']=='required' else '#9ca3af'
+        lines.append(f'<rect x="{a}" y="{b}" width="{c-a}" height="{d-b}" fill="none" stroke="{stroke}" stroke-dasharray="2 1" stroke-width="{max(min(w,h)/300,0.1)}"/>')
     lines.append('</svg>')
     target.parent.mkdir(parents=True,exist_ok=True)
     target.write_text('\n'.join(lines)+'\n',encoding='utf-8')

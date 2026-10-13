@@ -72,7 +72,7 @@ def test_klayout_layer_file_detection(tmp_path,monkeypatch):
     palette.write_text('<?xml version="1.0"?><layer-properties><properties/></layer-properties>')
     assert klayout_layers.acquire_lyp(project)==palette
     assert klayout_layers.klayout_open_argv('klayout.exe',tmp_path/'x.gds',palette=palette)==[
-        'klayout.exe','-l',str(palette),str(tmp_path/'x.gds')]
+        'klayout.exe',str(tmp_path/'x.gds'),'-l',str(palette),'-lx']
     palette.write_text('not xml')
     monkeypatch.setattr(klayout_layers.shutil,'which',lambda x:None)
     assert klayout_layers.acquire_lyp(project)==None

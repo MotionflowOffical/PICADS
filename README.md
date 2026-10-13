@@ -143,3 +143,7 @@ Existing `RUN_GLOBAL_VALIDATION.bat` and `RUN_FULL_VALIDATION.bat` continue to v
 - [Current implementation status](docs/IMPLEMENTATION_STATUS.md)
 - [Remaining required work](docs/NEXT_IMPLEMENTATION.md)
 - [v0.15.1 release notes](docs/RELEASE_NOTES_v0.15.1.md)
+
+### Selective CO physical constraints (r8)
+
+CO now distinguishes per-module guide/validate/required semantics and supports explicitly enforced *placement keepouts* sent through LibreLane. This does not yet place individual ALU/memory modules into physical fences. See [CO constraint documentation](docs/CO_SELECTIVE_PHYSICAL_CONSTRAINTS.md).
