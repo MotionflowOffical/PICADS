@@ -141,8 +141,15 @@ def physical_preflight(settings: dict, clocked: bool, *, check_tools: bool = Tru
                 checks[name] = {'status': info.get('status', 'UNAVAILABLE'),
                                 'path': f'WSL:{backend.get("distribution") or "not configured"}',
                                 'reason': info.get('detail') or (None if info.get('status') == 'PASS' else backend['detail'])}
-            checks['docker_wsl'] = {'status': backend.get('checks', {}).get('docker', {}).get('status', 'UNAVAILABLE'),
-                                    'reason': backend.get('checks', {}).get('docker', {}).get('detail') or backend['detail']}
+            docker_probe = backend.get('checks', {}).get('docker', {})
+            checks['docker_wsl'] = {
+                'status': docker_probe.get('status', 'UNAVAILABLE'),
+                'reason': docker_probe.get('detail') or backend['detail'],
+                'returncode': docker_probe.get('returncode'),
+                'stdout': docker_probe.get('stdout', ''),
+                'stderr': docker_probe.get('stderr', ''),
+                'command': docker_probe.get('command', []),
+            }
             if not backend['recorded_smoke_pass']:
                 notes.append('No matching recorded LibreLane smoke-test receipt; live executable probes do not constitute a full design flow.')
         else:

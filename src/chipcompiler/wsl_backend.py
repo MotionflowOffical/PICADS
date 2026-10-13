@@ -54,7 +54,7 @@ def backend_status(distribution: str | None = None, *, root: Path | None = None,
         return {**output, 'status': 'UNAVAILABLE', 'detail': 'wsl.exe not found by PICADS process.'}
     checks = {
         'yosys': 'command -v yosys >/dev/null && yosys -V >/dev/null',
-        'docker': 'docker info --format "{{.ServerVersion}}" >/dev/null',
+        'docker': 'docker info --format "{{.ServerVersion}}"',
         'librelane': ('test -x "$HOME/.local/share/picads-librelane/venv/bin/python" && '
                       '"$HOME/.local/share/picads-librelane/venv/bin/python" -c "import librelane"'),
     }
@@ -64,11 +64,43 @@ def backend_status(distribution: str | None = None, *, root: Path | None = None,
         args = [wsl, '--distribution', distro, '--exec', 'bash', '-lc', shell]
         try:
             done = run(args, check=False, capture_output=True, text=True, timeout=35)
-            passed = done.returncode == 0
-            detail = ((done.stderr or done.stdout or '').strip())[-600:]
+            rc = int(done.returncode)
+            stdout = str(getattr(done, 'stdout', '') or '').strip()[-1200:]
+            stderr = str(getattr(done, 'stderr', '') or '').strip()[-1200:]
+            passed = rc == 0
+            reason = None
+            if not passed:
+                combined = (stderr + '\n' + stdout).lower()
+                if name == 'docker':
+                    if ('command not found' in combined or 'not found in this wsl' in combined
+                            or rc == 127):
+                        reason = ('Docker CLI is missing in this Ubuntu environment. '
+                                  'Enable Docker Desktop > Settings > Resources > WSL Integration for this distribution.')
+                    elif 'permission denied' in combined:
+                        reason = 'Docker socket permission denied for this WSL user; inspect the integration and socket permissions.'
+                    elif ('cannot connect' in combined or 'daemon' in combined
+                          or 'connection refused' in combined):
+                        reason = 'Docker engine is not reachable from Ubuntu. Start Docker Desktop and recheck its WSL integration.'
+                    else:
+                        reason = ('Docker returned a nonzero exit code in Ubuntu; '
+                                  'inspect the captured stdout/stderr and run the diagnostic script.')
+                elif name == 'librelane':
+                    reason = 'The PICADS LibreLane virtual environment is missing or cannot import librelane.'
+                else:
+                    reason = 'Yosys is unavailable or failed inside the selected Ubuntu distribution.'
+            results[name] = {
+                'status': 'PASS' if passed else 'UNAVAILABLE',
+                'returncode': rc,
+                'command': args,
+                'stdout': stdout,
+                'stderr': stderr,
+                'detail': reason if reason else (stdout or stderr),
+            }
         except (OSError, subprocess.TimeoutExpired) as exc:
-            passed, detail = False, str(exc)
-        results[name] = {'status': 'PASS' if passed else 'UNAVAILABLE', 'detail': detail}
+            results[name] = {
+                'status': 'UNAVAILABLE', 'returncode': None, 'command': args,
+                'stdout': '', 'stderr': str(exc), 'detail': str(exc),
+            }
     good = all(check['status'] == 'PASS' for check in results.values())
     return {**output, 'status': 'READY' if good else 'UNAVAILABLE',
             'available': good, 'checks': results,
