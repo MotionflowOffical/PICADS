@@ -1,0 +1,59 @@
+architecture:
+  adder: ripple
+schedule:
+  mode: transactional
+  latencies:
+    READ: 1
+    WRITE: 1
+memory:
+  depth: 32
+  data_width: 15
+allocation:
+  sharing: auto
+  max_instances:
+    ADD: 1
+    SUB: 1
+    AND: 1
+floorplan:
+  enabled: true
+  enforcement: guide
+  region_um:
+  - 0
+  - 0
+  - 1500
+  - 1200
+  border_um: 25
+  min_spacing_um: 20
+  max_spacing_um: 80
+  preferred_spacing_um: 30
+  modules:
+  - name: Controller
+    weight: 3
+    source_function: apollo_luminary_core
+    modules:
+    - name: ControlFSM
+      weight: 3
+    - name: InstructionDecode
+      weight: 2
+    - name: InputOutput
+      weight: 2
+  - name: Arithmetic
+    resource: ADD
+    weight: 2
+    modules:
+    - name: ArithmeticLogic
+      weight: 3
+    - name: Flags
+      weight: 1
+  - name: Memory
+    weight: 4
+    modules:
+    - name: RegisterBank
+      weight: 3
+    - name: Addressing
+      weight: 1
+  - name: UnusedMultiply
+    resource: MUL
+
+synthesis:
+  abc_aig: true  # exported separately; does not replace PDK technology mapping

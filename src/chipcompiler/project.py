@@ -157,6 +157,18 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                        'schedule.pipeline_stages must be an integer in [0, 32].',file=co_path,
                        cause='Invalid scheduling configuration.',
                        remedy='Use 0 to disable pipelining, 1 for a registered output, or 2..32 for staged logic.')
+    synthesis_options = co.get('synthesis', {})
+    if not isinstance(synthesis_options, dict):
+        issues.add('CO.SYNTHESIS_FORMAT','ERROR','CO','load',
+                   'synthesis must be a mapping.',file=co_path)
+    else:
+        for field in synthesis_options:
+            if field != 'abc_aig':
+                issues.add('CO.SYNTHESIS_UNKNOWN','ERROR','CO','load',
+                           f'Unknown synthesis option {field!r}.',file=co_path)
+        if 'abc_aig' in synthesis_options and type(synthesis_options['abc_aig']) is not bool:
+            issues.add('CO.ABC_AIG_BOOLEAN','ERROR','CO','load',
+                       'synthesis.abc_aig must be true or false.',file=co_path)
     modules_config=co.get('modules',{})
     if not isinstance(modules_config,dict):
         issues.add('CO.MODULES_TYPE','ERROR','CO','load','modules must be a mapping.',file=co_path)
@@ -282,7 +294,7 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
         issues.add('MCD.CONCURRENT_MODE','ERROR','MCD','load',
                    'MCD.concurrent_clients only applies to schedule.mode: bound_fabric or source_processes.',file=config.get('mcd'))
     for field in co:
-        if field not in ('architecture','allocation','schedule','modules','memory','fabric'):
+        if field not in ('architecture','allocation','schedule','modules','memory','fabric','floorplan','synthesis'):
             issues.add('CO.UNSUPPORTED_DIRECTIVE','WARNING','CO','load',
                        f'CO directive {field!r} is not implemented and will NOT affect the generated circuit.',
                        file=co_path,remedy='Remove this directive or add an adapter that interprets and validates it.')

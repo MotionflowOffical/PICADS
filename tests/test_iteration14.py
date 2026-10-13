@@ -25,7 +25,10 @@ def test_physical_settings_mapped_to_librelane():
     },True)
     assert converted=={'CLOCK_PERIOD':20.0,'CLOCK_PORT':'clk','FP_CORE_UTIL':35.0,
                        'PL_TARGET_DENSITY_PCT':50.0, 'DIE_AREA':[0.0,0.0,210.5,300.0],
-                       'FP_SIZING':'absolute','STD_CELL_LIBRARY':'sky130_fd_sc_hd'}
+                       'FP_SIZING':'absolute','STD_CELL_LIBRARY':'sky130_fd_sc_hd',
+                       'PDN_ENABLE_RAILS':True,'PDN_ENABLE_GLOBAL_CONNECTIONS':True,
+                       'PDN_MULTILAYER':True,'PDN_CONNECT_MACROS_TO_GRID':True,
+                       'PDN_CORE_RING':False}
     assert cfg['pdk']=='sky130A'
 
 

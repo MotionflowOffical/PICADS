@@ -44,7 +44,7 @@ def normalize_physical_settings(settings: dict, clocked: bool) -> tuple[dict, di
     if not isinstance(settings, dict):
         raise ValueError('PHYSICAL.CONFIG_FORMAT: physical must be a YAML mapping')
     allowed = {'enabled', 'pdk', 'pdk_root', 'std_cell_library', 'dockerized', 'timeout_s',
-               'clock_period_ns', 'core_utilization', 'die_area_um', 'placement_density'}
+               'clock_period_ns', 'core_utilization', 'die_area_um', 'placement_density', 'power_grid'}
     unknown = set(settings) - allowed
     if unknown:
         raise ValueError('PHYSICAL.CONFIG_UNKNOWN: unsupported physical key(s): ' + ', '.join(sorted(unknown)))
@@ -80,6 +80,38 @@ def normalize_physical_settings(settings: dict, clocked: bool) -> tuple[dict, di
         ll['FP_SIZING'] = 'absolute'
     if 'std_cell_library' in settings:
         ll['STD_CELL_LIBRARY'] = settings['std_cell_library']
+    # Standard-cell power distribution is a real routed feature, not a solid
+    # GDS ground rectangle. Keep PDK technology defaults for widths/pitches.
+    grid = settings.get('power_grid', {})
+    if not isinstance(grid, dict):
+        raise ValueError('PHYSICAL.PDN_FORMAT: power_grid must be a mapping')
+    grid_keys = {'core_ring', 'rail', 'multilayer', 'global_connections',
+                 'connect_macros', 'vertical_pitch_um', 'horizontal_pitch_um',
+                 'vertical_width_um', 'horizontal_width_um'}
+    unknown_grid = set(grid) - grid_keys
+    if unknown_grid:
+        raise ValueError('PHYSICAL.PDN_UNKNOWN: ' + ', '.join(sorted(unknown_grid)))
+    for field in ('core_ring', 'rail', 'multilayer', 'global_connections', 'connect_macros'):
+        if field in grid and type(grid[field]) is not bool:
+            raise ValueError(f'PHYSICAL.PDN_BOOLEAN: power_grid.{field} must be boolean')
+    # A user requesting physical output must not silently disable power rails.
+    if grid.get('rail', True) is not True or grid.get('global_connections', True) is not True:
+        raise ValueError('PHYSICAL.PDN_REQUIRED: power rails and global power connections must stay enabled')
+    ll.update({
+        'PDN_ENABLE_RAILS': True,
+        'PDN_ENABLE_GLOBAL_CONNECTIONS': True,
+        'PDN_MULTILAYER': grid.get('multilayer', True),
+        'PDN_CONNECT_MACROS_TO_GRID': grid.get('connect_macros', True),
+        'PDN_CORE_RING': grid.get('core_ring', False),
+    })
+    dimensions = {'vertical_pitch_um':'PDN_VPITCH', 'horizontal_pitch_um':'PDN_HPITCH',
+                  'vertical_width_um':'PDN_VWIDTH', 'horizontal_width_um':'PDN_HWIDTH'}
+    for field, ll_field in dimensions.items():
+        if field in grid:
+            ll[ll_field] = _number(grid[field], 0.1, 10000, 'power_grid.' + field)
+    for axis in ('V','H'):
+        if f'PDN_{axis}PITCH' in ll and f'PDN_{axis}WIDTH' in ll and ll[f'PDN_{axis}WIDTH'] >= ll[f'PDN_{axis}PITCH']:
+            raise ValueError(f'PHYSICAL.PDN_GEOMETRY: {axis} strap width must be smaller than pitch')
     # PDK is selected by the command line; don't confuse it with PDK_ROOT.
     return dict(settings), ll
 
@@ -158,6 +190,16 @@ def physical_preflight(settings: dict, clocked: bool, *, check_tools: bool = Tru
                 status = tool_status(name)
                 checks[name] = {'status': 'PASS' if status['available'] else 'UNAVAILABLE',
                                 'path': status['path'], 'reason': status['error']}
+    checks['pdn_configuration'] = {
+        'status':'PASS' if all(ll.get(k) is True for k in
+            ('PDN_ENABLE_RAILS','PDN_ENABLE_GLOBAL_CONNECTIONS')) else 'BLOCKED',
+        'rails':ll.get('PDN_ENABLE_RAILS'),
+        'multilayer':ll.get('PDN_MULTILAYER'),
+        'global_connections':ll.get('PDN_ENABLE_GLOBAL_CONNECTIONS'),
+        'macros':ll.get('PDN_CONNECT_MACROS_TO_GRID'),
+        'core_ring':ll.get('PDN_CORE_RING'),
+        'scope':'Configuration validated, not physical connectivity or voltage drop'
+    }
     if not clocked:
         notes.append('Combinational design: clock-based STA alone does not qualify input/output delay constraints')
     if any(v['status'] in ('FAIL', 'BLOCKED') for v in checks.values()):

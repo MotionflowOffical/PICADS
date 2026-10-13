@@ -273,6 +273,30 @@ class BuildSession:
                 graph.semantics='TIME_MULTIPLEXED_EXECUTABLE_DLS'
             atomic_write(self.out/'architecture.json',json.dumps(graph.as_dict(),indent=2))
             self.result.files['architecture']=str(self.out/'architecture.json')
+            # CO-driven hierarchical physical *planning* is separate from
+            # cell placement. Never claim a rectangle was enforced in GDS.
+            floor_settings=self.project.co.get('floorplan')
+            if floor_settings is not None:
+                from .floorplanning import plan_floorplan, render_floorplan_svg, FloorplanError
+                try:
+                    if not isinstance(floor_settings,dict) or type(floor_settings.get('enabled',True)) is not bool:
+                        raise FloorplanError('CO.FLOORPLAN_INVALID: floorplan must be a mapping with boolean enabled')
+                    if floor_settings.get('enabled',True):
+                        planned=plan_floorplan(floor_settings,self.dls,graph,self.project.co,
+                                               self.project.config.get('physical') or {})
+                        path=self.out/'module_floorplan.json'
+                        atomic_write(path,json.dumps(planned,indent=2))
+                        picture=render_floorplan_svg(planned,self.out/'module_floorplan.svg')
+                        self.result.files['module_floorplan']=str(path)
+                        self.result.files['module_floorplan_svg']=str(picture)
+                        self._done('floorplan','GUIDE_ONLY',module_count=len(planned['modules']),
+                                   pruned=planned['pruned'],enforcement='NOT_APPLIED_TO_PNR')
+                except FloorplanError as exc:
+                    issue=self.issues.add('CO.FLOORPLAN_ERROR','ERROR','CO','floorplan',str(exc),
+                        cause='Requested floorplan constraints cannot be satisfied or cannot be physically enforced.',
+                        remedy='Check CO floorplan regions, spacing and module bindings. Use enforcement: guide until a cell-region EDA backend is available.')
+                    self._done('floorplan','FAIL',issue_id=issue.issue_id)
+                    raise DiagnosticException(issue)
             # A separate functional DLS is generated for every reachable helper.
             # The physical top is flattened; hierarchy isn't falsely implied.
             modules_dir=self.out/'modules';modules_dir.mkdir(exist_ok=True)
@@ -424,6 +448,38 @@ class BuildSession:
                 evidence={'artifact':str(synthesized)})
             self._done('yosys','FAIL',issue_id=i.issue_id)
             self._block('physical',i);return
+        # Optional ABC-optimized AIG is a real post-synthesis artifact, not a
+        # replacement for the technology-mapped PDK netlist consumed by PnR.
+        synth_co = self.project.co.get('synthesis') or {}
+        if synth_co.get('abc_aig'):
+            from .aig import inspect_aiger_header
+            aig_name='abc_optimized.aig'
+            aig_cmd=('read_verilog '+rtl.name+'; '
+                     'hierarchy -check -top '+self.dls.name+'; '
+                     'synth -top '+self.dls.name+' -flatten -noabc; '
+                     'dffunmap; abc -g AND; aigmap; '
+                     'write_aiger -zinit -symbols '+aig_name)
+            aig_run=run_external(['yosys','-p',aig_cmd],self.out,self.out,
+                                 self.issues,self.events,'abc_aig',timeout=600,**opts)
+            if aig_run['status'] != 'PASS':
+                self._done('abc_aig',aig_run['status'],
+                           **{k:v for k,v in aig_run.items() if k!='status'})
+                self._block('physical',aig_run.get('issue_id'))
+                return
+            try:
+                aig_stats=inspect_aiger_header(self.out/aig_name)
+            except (ValueError,OSError) as exc:
+                i=self.issues.add('ABC.AIG_INVALID','ERROR','TOOL','abc_aig',str(exc),
+                    cause='No valid nonempty optimized AIGER was produced.',
+                    remedy='Inspect abc_aig.log; ensure Yosys ABC and AIGER backend are available.')
+                self._done('abc_aig','FAIL',issue_id=i.issue_id)
+                self._block('physical',i)
+                return
+            atomic_write(self.out/'abc_aig_stats.json',json.dumps(aig_stats,indent=2))
+            self.result.files['abc_optimized_aig']=str(self.out/aig_name)
+            self.result.files['abc_aig_stats']=str(self.out/'abc_aig_stats.json')
+            self._done('abc_aig','PASS',**aig_stats,
+                       physical_input='Original RTL; LibreLane performs PDK-specific ABC mapping')
         self.result.files['synthesized_netlist']=str(synthesized)
         self.events.emit('yosys','artifact_verified',path=str(synthesized),bytes=synthesized.stat().st_size)
         if self.mode!='physical':return

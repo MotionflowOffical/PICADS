@@ -886,8 +886,9 @@ class Window(QMainWindow):
         controls=[('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),
                   ('Latest GDS / Mask Layers',self.latest_layout),('Open GDS/OASIS in KLayout',self.open_mask),
                   ('Configure SKY130 / WSL',self.configure_physical),('Check Physical Prerequisites',self.preflight_physical),
-                  ('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree)]
-        for offset in (0,4):
+                  ('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree),
+                  ('Planned Module Regions',self.show_planned_floorplan)]
+        for offset in range(0,len(controls),4):
             buttons=QHBoxLayout()
             for text,fn in controls[offset:offset+4]:
                 b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
@@ -898,6 +899,30 @@ class Window(QMainWindow):
         self.physical_layout=v
         self.mask_svg_widget=None
         return w
+    def show_planned_floorplan(self):
+        """Show source-level CO floorplan; never label it actual GDS placement."""
+        path=self.root/'build'/'latest'/'module_floorplan.svg'
+        report_file=self.root/'build'/'latest'/'module_floorplan.json'
+        if not path.is_file() or not report_file.is_file():
+            QMessageBox.information(self,'No module floorplan',
+                'Add an enabled floorplan section to architecture.co and compile the project. '
+                'A floorplan preview does not place standard cells or generate a GDS.')
+            return
+        try:
+            data=json.loads(report_file.read_text(encoding='utf-8'))
+            self.physical_message.setPlainText(json.dumps({
+                'status':data['status'], 'units':data['units'],
+                'modules':data['modules'], 'pruned':data['pruned'],
+                'warnings':data['warnings']},indent=2))
+            if self.mask_svg_widget is None:
+                from PySide6.QtSvgWidgets import QSvgWidget
+                self.mask_svg_widget=QSvgWidget()
+                self.physical_layout.addWidget(self.mask_svg_widget,4)
+            self.mask_svg_widget.load(str(path))
+            self.tabs.setCurrentIndex(3)
+        except (OSError,ValueError,KeyError) as exc:
+            QMessageBox.warning(self,'Floorplan preview could not open',str(exc))
+
     def configure_physical(self):
         """Explicitly configure project YAML, with backup and editor protections."""
         from .physical_setup import configure_physical_project

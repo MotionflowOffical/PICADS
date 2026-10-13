@@ -149,7 +149,8 @@ def test_physical_evidence_gds_and_known_checks(tmp_path):
         'klayout__antenna_error__count':0,'timing__setup__ws':0.015}))
     ev=inspect_librelane(tmp_path/'run')
     assert ev.status=='LAYOUT_GENERATED'
-    assert all(v['status']=='PASS' for v in ev.checks.values())
+    assert all(v['status']=='PASS' for k,v in ev.checks.items() if k!='pdn_specialnets')
+    assert ev.checks['pdn_specialnets']['status']=='UNVERIFIED'  # no routed DEF supplied
     (final/'metrics.json').write_text(json.dumps({'klayout__drc_error__count':7}))
     ev=inspect_librelane(tmp_path/'run')
     assert ev.status=='FAIL'

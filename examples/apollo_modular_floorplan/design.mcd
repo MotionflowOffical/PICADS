@@ -1,0 +1,15 @@
+top: apollo_luminary_core
+description: >
+  Source-only, Apollo 11 Luminary 099-inspired Block II AGC execution test.
+  Synthesizes one clocked PICADS circuit with instruction fetch, a 15-bit
+  accumulator, Z and Q registers, control flags, I/O latch and unified
+  32-word erasable/program store. The external host preloads instruction
+  words through the program/load port. Not a flight-software interpreter,
+  authentic fixed-memory rope, or complete Apollo Guidance Computer.
+modules:
+  - name: AGCInstructionSequencer
+    function: apollo_luminary_core
+    purpose: >
+      One generated sequential microcomputer; actual instruction fetch from
+      on-chip memory, branch/control decoding, AGC-style 1s-complement
+      arithmetic, and selected Luminary start initialization.

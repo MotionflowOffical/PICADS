@@ -1,25 +1,25 @@
 {
   "product": "PICADS",
   "version": "0.16.8",
-  "revision": "r4",
-  "type": "portability and storage lifecycle + end-to-end physical build usability",
+  "revision": "r6",
+  "type": "hierarchical module planning + optional ABC-optimized AIGER + configurable physical PDN",
   "changes": [
-    "Explicit user-controlled inventory, uninstall and clean-up for PICADS managed binaries/caches/build artifacts",
-    "WinGet KiCad removal offered only for a matching PICADS-initiated WinGet receipt",
-    "No destructive management of Docker Desktop, images, WSL distro, shared Ciel PDKs, global pip cache, MSYS2 or unrecognized installs",
-    "PICADS-scoped pip download caching for new LibreLane WSL installations",
-    "Explicit SKY130/WSL physical configuration with backed-up chip.yaml",
-    "Windows-to-WSL build directory translation using wslpath with accessibility check",
-    "Visible physical.disabled diagnostics; LibreLane output GDS artifact manifest and layer browser",
-    "Standalone RUN_SKY130_REFERENCE.bat first PICADS chip GDS attempt"
+    "CO-based checked hierarchical region guides and scalable SVG (not yet enforced as physical place-and-route fences)",
+    "CO synthesis.abc_aig opt-in for a real ABC-optimized AIGER artifact with checked AIGER header",
+    "PDN_ENABLE_RAILS and global connections explicitly enabled, multilayer PDK-driven grid and optional core ring",
+    "Custom PDN pitch/width validation and read-only final DEF SPECIALNETS inspection",
+    "Apollo modular floorplan example with AIG and power-grid settings",
+    "Tests for floorplan, AIG, PDN and old preflight compatibility"
   ],
-  "verification": {
-    "targeted_pytest": "124 passed, 1 skipped (local Linux plus mocked WSL/EDA and GUI)",
-    "native_Windows_GUI_and_PICADS_GDS": "NOT RUN on user machine",
-    "user_librelane_smoke_test": "80/80 stages passed as logged by user on 2026-10-12",
-    "physical_signoff": "NOT VERIFIED",
-    "custom_thin_film_fabrication": "NOT VERIFIED"
-  },
-  "external_binaries_included": false,
-  "installation": "Overlay patch on existing PICADS program root. Do not remove dependencies or existing projects."
+  "limitations": [
+    "Physical regions remain a guide; no standard-cell instance-to-region fence enforcement",
+    "ABC AIGER is a sidecar and does not replace PDK-mapped physical RTL",
+    "Power-grid configuration does not prove physical connectivity, IR drop, electromigration or manufacturing signoff",
+    "No real Windows/WSL LibreLane v0.16.8r6 test completed"
+  ],
+  "validation": {
+    "regression_selected": "127 passed",
+    "windows_librelane": "NOT_RUN",
+    "full_suite": "INTERRUPTED_RUNTIME_LIMIT"
+  }
 }

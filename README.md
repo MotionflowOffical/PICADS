@@ -1,3 +1,7 @@
+## v0.16.8r6 — CO module region guides, ABC AIG export, explicit power grid
+
+PICADS can now produce nested CO-driven architectural region guides (`module_floorplan.json` and scalable SVG), optionally export ABC-optimized AIGER after Yosys, and explicitly configure and inspect a PDK-driven power/ground distribution grid in LibreLane. **Region guides are not actual enforced placement**; Apollo's transactional design remains flattened, and manufacturing signoff is not established. See [module planning](docs/MODULE_FLOORPLANNING.md) and [ABC AIG and power-grid reference](docs/ABC_AIG_AND_POWER_GRID_v0.16.8r6.md).
+
 ## v0.16.8r4 — reversible dependency storage + SKY130 physical flow
 
 The new **Storage / Uninstall / Cleanup** manager finds PICADS-owned portable installs, scoped WSL LibreLane caches, historical build outputs, and safe leftovers. Removal requires explicit selection and confirmation; the original installer can reinstall supported tools. **Docker data, WSL distributions and PDKs are not deleted.**

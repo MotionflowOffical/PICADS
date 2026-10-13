@@ -71,6 +71,20 @@ def inspect_librelane(run_dir:Path,expected_top:str|None=None)->PhysicalEvidence
         else:
             artifacts.setdefault('missing_optional',[]).append(label)
 
+    # Read the routed DEF's actual power/ground SPECIALNETS; configured PDN
+    # switches are not proof of electrically connected power distribution.
+    from .pdn import inspect_def_specialnets
+    def_files = (final/'def')
+    defs = sorted(def_files.rglob('*.def')) if def_files.is_dir() else []
+    if defs:
+        try:
+            checks['pdn_specialnets'] = inspect_def_specialnets(defs[0])
+            checks['pdn_specialnets']['source'] = str(defs[0])
+        except OSError as exc:
+            checks['pdn_specialnets']={'status':'UNVERIFIED','reason':str(exc)}
+    else:
+        checks['pdn_specialnets']={'status':'UNVERIFIED',
+                                   'reason':'No final routed DEF available to inspect SPECIALNETS'}
     if mp.is_file():
         metrics=str(mp)
         artifacts['metrics']={'path':str(mp),'sha256':artifact_hash(mp),'bytes':mp.stat().st_size}

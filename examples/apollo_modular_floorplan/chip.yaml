@@ -1,0 +1,25 @@
+name: Apollo11_Luminary_AGC_Physical_SKY130
+source: circuit.py
+mcd: design.mcd
+co: architecture.co
+# Verification of the DLS-to-Verilog mapping is still performed internally.
+# Optional external Icarus RTL testing is disabled to avoid blocking a
+# physical build on machines without iverilog inside Ubuntu.
+verification:
+  external_rtl: false
+tools:
+  execution: wsl
+  wsl_distribution: Ubuntu
+physical:
+  enabled: true
+  pdk: sky130A
+  std_cell_library: sky130_fd_sc_hd
+  clock_period_ns: 100
+  core_utilization: 25
+  timeout_s: 14400
+  power_grid:
+    rail: true
+    global_connections: true
+    multilayer: true
+    connect_macros: true
+    core_ring: false
