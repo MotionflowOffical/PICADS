@@ -1,25 +1,26 @@
 {
   "product": "PICADS",
   "version": "0.16.8",
-  "revision": "r8",
-  "category": "Selective CO constraints, real hard keepout submission, fail-closed module requirements",
+  "revision": "r9",
+  "category": "Native CO hard-macro integration with real routed DEF/GDS placement verification",
   "changes": [
-    "CO floorplan modules independently choose guide/validate/required",
-    "Physical enforcement requests for unsupported technology-mapped module fences fail with an explicit error",
-    "CO keepouts with hard required enforcement are translated to LibreLane FP_OBSTRUCTIONS",
-    "CO keepout bounds, overlaps, modes, names and die are validated before external tools run",
-    "CORE_AREA physical setting supported with strict DIE_AREA bounds checks",
-    "A minimal SKY130 demo and behavior tests demonstrate real constraints versus guidance",
-    "Includes the earlier KLayout -lx visibility fix"
+    "New native physical_macros CO backend (no project-specific batch scripts)",
+    "Strict RTL/top instance names, sizes and spacing; real LEF-derived macro placement",
+    "Macro hardening, cached child views, top-level LibreLane MACROS integration",
+    "Defensive final routed DEF coordinate and GDS SREF/hierarchy checks",
+    "Bare Tiny8 modular project with 4 configuration/source files plus RTL child/top modules",
+    "CO ABC/AIG export scoped to each macro; source-equivalence boundary explicitly recorded"
   ],
   "limitations": [
-    "A floorplan module with enforcement required is NOT physically placed: it is rejected until cell mapping and OpenROAD placement integration are available",
-    "Hard FP_OBSTRUCTIONS prevents standard-cell sites but not arbitrary signal or power routing",
-    "No Windows WSL LibreLane run was executed during this update",
-    "Post-placement constraint and mask signoff are not established by requested obstructions"
+    "Modular RTL is not automatically derived from Tiny8 transactional Python/DLS; sequential equivalence is not proven",
+    "Only top-level unique hard RTL blocks are currently supported; arbitrary DLS cell fences are not implemented",
+    "No live WSL SKY130 place-and-route executed in this environment",
+    "DRC/LVS/timing/foundry signoff are not established by these changes"
   ],
   "validation": {
-    "selected_tests": "152 passed",
-    "windows_librelane": "NOT_RUN"
+    "selected_tests": "81 passed, 2 skipped",
+    "mock_macro_flow": "5 native CO tests including mocked complete layout",
+    "windows_librelane": "NOT_RUN",
+    "macro_tests": "6 passed including mocked LibreLane completed flow"
   }
 }

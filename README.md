@@ -1,3 +1,7 @@
+## PICADS r9: native CO hard macro physical placement
+
+The normal Physical Layout action now reads `physical_macros` in `architecture.co`, builds real separate RTL macros and checks their routed placement. See [Native CO hard macro documentation](docs/CO_NATIVE_HARD_MACROS_r9.md). A bare project is supplied at `examples/tiny8_co_native`. Its physical RTL is independent of the transactional Python DLS reference; equivalence remains unverified. The first live Windows/WSL GDS build is not yet tested.
+
 ## v0.16.8r7 — separated GDS generation, deferred verification, named SKY130 layers
 
 Physical generation and post-layout verification now have separate GUI actions

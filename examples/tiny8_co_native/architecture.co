@@ -1,0 +1,48 @@
+# Tiny8 native PICADS project. No external scripts or generated outputs.
+# Python transactional CPU = DLS/functional reference.
+# The CO-selected modular RTL is an independent physical implementation;
+# sequential equivalence is not yet established by PICADS.
+architecture:
+  adder: ripple
+schedule:
+  mode: transactional
+  latencies: {READ: 1, WRITE: 1}
+memory:
+  depth: 16
+  data_width: 8
+allocation:
+  sharing: auto
+  max_instances: {ADD: 1, SUB: 1, AND: 1, OR: 1, XOR: 1}
+synthesis:
+  abc_aig: true
+
+# Native PICADS CO physical backend: all hardening, placement, routing and
+# DEF/GDS position verification are invoked by Generate Physical Layout.
+physical_macros:
+  enabled: true
+  enforcement: required
+  top_module: tiny8_modular_top
+  top_rtl: rtl/tiny8_modular_top.v
+  halo_um: 5
+  spacing:
+    min_um: 20
+    preferred_um: 30
+    max_um: 75
+  blocks:
+    - name: ScratchpadMemory
+      module: tiny8_memory
+      instance: u_memory
+      rtl: rtl/tiny8_memory.v
+      clock_port: clk
+      die_size_um: [180, 180]
+    - name: Control
+      module: tiny8_control
+      instance: u_control
+      rtl: rtl/tiny8_control.v
+      clock_port: clk
+      die_size_um: [200, 180]
+    - name: ArithmeticLogic
+      module: tiny8_alu
+      instance: u_alu
+      rtl: rtl/tiny8_alu.v
+      die_size_um: [115, 115]

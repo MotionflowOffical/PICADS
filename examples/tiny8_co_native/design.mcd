@@ -1,0 +1,11 @@
+top: tiny8_cpu
+description: >
+  Tiny8 8-bit stored-program educational CPU for the native PICADS compiler.
+  CO module regions are architectural guides only; actual ALU, memory and control
+  placement fencing requires a future compiler/backend capability.
+modules:
+  - name: Tiny8Processor
+    function: tiny8_cpu
+    purpose: >
+      Execute commands, fetch and decode instructions, operate on the 8-bit ALU,
+      access the 16 x 8-bit scratchpad and update PC/accumulator/output status.

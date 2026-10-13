@@ -1,0 +1,32 @@
+name: Tiny8_CO_Native_Modular_SKY130
+source: circuit.py
+mcd: design.mcd
+co: architecture.co
+verification:
+  external_rtl: false
+tools:
+  execution: wsl
+  wsl_distribution: Ubuntu
+physical:
+  enabled: true
+  pdk: sky130A
+  std_cell_library: sky130_fd_sc_hd
+  clock_period_ns: 100
+  core_utilization: 25
+  timeout_s: 14400
+  power_grid:
+    rail: true
+    global_connections: true
+    multilayer: true
+    connect_macros: true
+    core_ring: false
+  die_area_um:
+  - 0
+  - 0
+  - 440
+  - 440
+  core_area_um:
+  - 15
+  - 15
+  - 425
+  - 425

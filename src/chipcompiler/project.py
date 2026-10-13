@@ -157,6 +157,19 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
                        'schedule.pipeline_stages must be an integer in [0, 32].',file=co_path,
                        cause='Invalid scheduling configuration.',
                        remedy='Use 0 to disable pipelining, 1 for a registered output, or 2..32 for staged logic.')
+    # Native hard-macro CO declarations are checked before launching any EDA
+    # tool. Their sources remain inside the project root.
+    macro_co = co.get('physical_macros')
+    if macro_co is not None:
+        try:
+            if not isinstance(macro_co,dict) or type(macro_co.get('enabled')) is not bool:
+                raise ValueError('CO.MACROS_CONFIG: physical_macros.enabled must be true or false')
+            from .co_macros import read_macro_constraints, MacroConstraintError
+            if macro_co['enabled']:
+                read_macro_constraints(macro_co, root, config.get('physical') or {})
+        except (MacroConstraintError, ValueError, KeyError) as exc:
+            issues.add('CO.MACROS_INVALID','ERROR','CO','load',str(exc),file=co_path,
+                       remedy='Correct physical_macros: top_rtl, top_module, real RTL blocks, sizing and spacing.')
     synthesis_options = co.get('synthesis', {})
     if not isinstance(synthesis_options, dict):
         issues.add('CO.SYNTHESIS_FORMAT','ERROR','CO','load',
@@ -294,7 +307,7 @@ def open_project(path:Path,issues:IssueCollector)->ChipProject|None:
         issues.add('MCD.CONCURRENT_MODE','ERROR','MCD','load',
                    'MCD.concurrent_clients only applies to schedule.mode: bound_fabric or source_processes.',file=config.get('mcd'))
     for field in co:
-        if field not in ('architecture','allocation','schedule','modules','memory','fabric','floorplan','synthesis'):
+        if field not in ('architecture','allocation','schedule','modules','memory','fabric','floorplan','synthesis','physical_macros'):
             issues.add('CO.UNSUPPORTED_DIRECTIVE','WARNING','CO','load',
                        f'CO directive {field!r} is not implemented and will NOT affect the generated circuit.',
                        file=co_path,remedy='Remove this directive or add an adapter that interprets and validates it.')

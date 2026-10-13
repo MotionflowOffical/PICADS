@@ -88,7 +88,9 @@ class BuildSession:
             if not self.issues.errors and self.mode=='layout' and self.result.stages.get('physical',{}).get('status')=='PASS':
                 self.result.status='LAYOUT_GENERATED_UNVERIFIED'
             elif not self.issues.errors and self.mode=='verify_layout' and self.result.stages.get('verification',{}).get('status')=='PASS':
-                self.result.status='VERIFIED_REPORTED_CHECKS_NOT_FOUNDRY_SIGNOFF'
+                self.result.status=('VERIFIED_LAYOUT_CHECKS_RTL_EQUIVALENCE_UNPROVEN'
+                                    if self.result.stages.get('co_macro_equivalence') else
+                                    'VERIFIED_REPORTED_CHECKS_NOT_FOUNDRY_SIGNOFF')
             report_file=self.out/('layout_verification_report.json' if self.mode=='verify_layout' else 'report.json')
             self.result.files['report']=str(report_file)
             self.result.files['events']=str(self.out/('layout_verification_events.jsonl' if self.mode=='verify_layout' else 'events.jsonl'))
@@ -437,6 +439,34 @@ class BuildSession:
                     remedy='Configure physical.pdk: sky130A for the tested reference process.')
                 self._done('physical', 'BLOCKED', issue_id=issue.issue_id)
                 return
+        # CO-native hard-macro implementation is a distinct physical backend.
+        # It consumes the explicitly named physical RTL blocks, not the
+        # flattened DLS top. Never imply Python/RTL sequential equivalence.
+        macro_spec=self.project.co.get('physical_macros')
+        if macro_spec and macro_spec.get('enabled'):
+            from .co_macros import run_native_macro_flow, MacroConstraintError
+            execution=(self.project.config.get('tools') or {}).get('execution','native')
+            distribution=(self.project.config.get('tools') or {}).get('wsl_distribution')
+            pf=physical_preflight(self.project.config.get('physical') or {}, True,
+                                  execution=execution,wsl_distribution=distribution)
+            atomic_write(self.out/'physical_preflight.json',json.dumps(pf.as_dict(),indent=2))
+            self.result.files['physical_preflight']=str(self.out/'physical_preflight.json')
+            self._done('physical_preflight',pf.status,checks=pf.checks)
+            if any(v.get('status') in ('FAIL','BLOCKED','UNAVAILABLE') for k,v in pf.checks.items()
+                   if k in ('settings','enabled','pdk','yosys','librelane','docker_wsl')):
+                issue=self.issues.add('PHYSICAL.MACRO_PREFLIGHT','ERROR','DEPENDENCY','physical',
+                    'CO hard macro backend is missing required physical tools or configuration.',
+                    evidence=pf.checks)
+                self._done('physical','UNAVAILABLE',issue_id=issue.issue_id)
+                return
+            try:
+                run_native_macro_flow(self,pf)
+            except (MacroConstraintError,FileNotFoundError,OSError,ValueError) as exc:
+                issue=self.issues.add('CO.MACRO_PHYSICAL_FAILED','ERROR','PHYSICAL','physical',str(exc),
+                    cause='Required hard macro construction or real DEF/GDS placement did not meet CO constraints.',
+                    remedy='Inspect per-macro LibreLane logs and co_macro_plan.json; avoid claiming a successful flat fallback.')
+                self._done('physical','FAIL',issue_id=issue.issue_id)
+            return
         backend=(self.project.config.get('tools') or {}).get('execution','native')
         wsl_dist=(self.project.config.get('tools') or {}).get('wsl_distribution')
         opts={'runner':backend,'wsl_distribution':wsl_dist} if backend=='wsl' else {}
@@ -682,6 +712,9 @@ class BuildSession:
             self._done('verification','BLOCKED',issue_id=i.issue_id);return
         self._done('layout_reuse','PASS',gds=str(gds),bytes=gds.stat().st_size,
                    no_resynthesis=True,no_replacement_of_gds=True)
+        if manifest.get('rtl_source')=='CO_EXPLICIT_MODULAR_RTL':
+            self._done('co_macro_equivalence','UNVERIFIED',
+                reason='Saved Python DLS is not equivalent-by-construction to separately supplied CO physical RTL; formal equivalence is required.')
         prior_tag=manifest['run_tag']
         from .project import open_project
         self.project=open_project(self.root,self.issues)
@@ -697,7 +730,7 @@ class BuildSession:
             self.result.files['dls']=str(dls_path)
             self.result.files['equivalence']=str(functional_path)
             self._done('equivalence',functional.status,vectors=functional.vectors,exhaustive=functional.exhaustive,
-                       provenance='saved source snapshot + saved DLS')
+                       provenance='saved Python source snapshot + saved DLS (NOT modular physical RTL)' if manifest.get('rtl_source')=='CO_EXPLICIT_MODULAR_RTL' else 'saved source snapshot + saved DLS')
             if functional.status in ('FAIL','ERROR'):
                 i=self.issues.add('VERIFY.FUNCTIONAL_FAIL','ERROR','VERIFIER','equivalence',
                     'The saved generated DLS failed source equivalence. Physical verification not run.')
@@ -716,6 +749,16 @@ class BuildSession:
         backend=(self.project.config.get('tools') or {}).get('execution','native')
         distro=(self.project.config.get('tools') or {}).get('wsl_distribution')
         options={'runner':backend,'wsl_distribution':distro} if backend=='wsl' else {}
+        # Native CO macro projects have their own independent child layouts.
+        # Resume those post-layout checks before claiming verification of the
+        # assembled parent. Generation intentionally stopped each child at
+        # Magic.WriteLEF; it did not silently waive XOR, DRC or LVS.
+        if manifest.get('rtl_source') == 'CO_EXPLICIT_MODULAR_RTL':
+            from .co_macros import verify_cached_macro_children
+            children = verify_cached_macro_children(self, manifest, settings, options)
+            if not children:
+                self._done('verification','FAIL',reason='A required macro failed physical verification; see macro_signoff and its log')
+                return
         cmd=['librelane']+(['--dockerized'] if backend=='wsl' or settings.get('dockerized') else [])
         if settings.get('pdk_root'):
             cmd+=['--pdk-root',str(settings['pdk_root'])]
@@ -743,7 +786,8 @@ class BuildSession:
             self._done('verification','FAIL',issue_id=i.issue_id);return
         self._done('verification','PASS' if all(c['status']=='PASS' for k,c in evidence.checks.items()
                     if k in ('drc_klayout','drc_magic','lvs','antenna')) else 'PARTIAL',
-                   checks=evidence.checks,foundry_signoff='NOT_CERTIFIED')
+                   checks=evidence.checks,foundry_signoff='NOT_CERTIFIED',
+                   modular_rtl_equivalence='NOT_ESTABLISHED' if manifest.get('rtl_source')=='CO_EXPLICIT_MODULAR_RTL' else 'N/A')
 
     def _run_source_processes(self):
         """Compile separate source-defined transactional FSMs that run concurrently.
