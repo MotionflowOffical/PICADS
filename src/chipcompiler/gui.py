@@ -13,6 +13,7 @@ from .ir import DLS
 from .waveform import export_vcd
 from .maskinspect import inspect_gds
 from .maskrender import render_gds_svg
+from .klayout_layers import acquire_lyp, klayout_open_argv
 from .dependencies import TOOLS, tool_status, register_tool, unregister_tool, settings_file, resolve_tool, dependency_environment, auto_detect_all
 from .pdk import pdk_status, register_pdk, clear_pdk
 from .windows_installer import install_selected, install_catalog, dependency_root
@@ -487,7 +488,8 @@ class Window(QMainWindow):
         self.action('Generate DLS',lambda:self.build('compile'),tool,'F5')
         self.action('Simulate',self.simulate,tool,'F6')
         self.action('Synthesize',lambda:self.build('build'),tool,'F7')
-        self.action('Physical Flow',lambda:self.build('physical'),tool,'F8')
+        self.action('Generate Layout (GDS)',lambda:self.build('layout'),tool,'F8')
+        self.action('Verify Existing Layout',lambda:self.build('verify_layout'),tool,'F9')
         self.action('Mask Viewer',self.open_mask,tool)
         tool.addSeparator()
         self.action('Snapshot',self.make_snapshot,tool)
@@ -497,7 +499,9 @@ class Window(QMainWindow):
         for label,fn in [('New Project',self.new_project),('Open Project',self.select_project),('Save All',self.save_all),('Snapshot',self.make_snapshot),('Restore',self.restore_backup)]:self.action(label,fn,file)
         build=m.addMenu('Build');self.action('Compile & Verify',lambda:self.build('compile'),build)
         self.action('Synthesize with Yosys',lambda:self.build('build'),build)
-        self.action('Physical Implement',lambda:self.build('physical'),build)
+        self.action('Generate Physical Layout (no signoff)',lambda:self.build('layout'),build)
+        self.action('Verify Existing Layout (resume DRC / LVS)',lambda:self.build('verify_layout'),build)
+        self.action('Full Physical Flow (legacy)',lambda:self.build('physical'),build)
         view=m.addMenu('View')
         for idx,text in enumerate(['Code + Logic Graph','Architecture / Dependencies','Simulate / Debug','Physical / Masks','Build / Export','History / Recovery','Settings','Concurrent Fabric']):
             self.action(text,lambda checked=False,i=idx:self.tabs.setCurrentIndex(i),view)
@@ -606,11 +610,12 @@ class Window(QMainWindow):
     def build(self,mode):
         if self.worker and self.worker.isRunning():
             QMessageBox.warning(self,'Build running','Existing build must finish before starting a new one.');return
-        self.save_all()
+        if mode!='verify_layout':self.save_all()
         # An old successful DLS must never remain simulatable while a new
         # (possibly faulty) source is being compiled.
-        self.dls=None;self.last_report=None
-        self.graph.show_dls(None);self.reset_sim()
+        if mode!='verify_layout':
+            self.dls=None;self.last_report=None
+            self.graph.show_dls(None);self.reset_sim()
         self.problem_tree.clear();self.stage_list.clear();self.artifacts.clear()
         self.logview.appendPlainText(f'--- {mode.upper()} started, source files saved ---')
         self.worker=BuildWorker(self.root,mode)
@@ -884,9 +889,12 @@ class Window(QMainWindow):
         title=QLabel('Physical Layout / Mask Data');title.setObjectName('section');v.addWidget(title)
         v.addWidget(QLabel('Real masks are only available after a successful physical EDA run with a valid PDK. No synthetic mask is displayed.'))
         controls=[('Inspect GDS Metadata',self.inspect_mask),('Render GDS Geometry',self.render_mask),
-                  ('Latest GDS / Mask Layers',self.latest_layout),('Open GDS/OASIS in KLayout',self.open_mask),
+                  ('Latest GDS / Mask Layers',self.latest_layout),('Open Latest GDS in KLayout',self.open_latest_in_klayout),
+                  ('Open Other GDS/OASIS',self.open_mask),
                   ('Configure SKY130 / WSL',self.configure_physical),('Check Physical Prerequisites',self.preflight_physical),
-                  ('Run Physical Flow',lambda:self.build('physical')),('Refresh Artifacts',self.populate_tree),
+                  ('1. Generate Physical Layout (GDS)',lambda:self.build('layout')),
+                  ('2. Verify Existing Layout (DRC / LVS)',lambda:self.build('verify_layout')),
+                  ('Refresh Artifacts',self.populate_tree),
                   ('Planned Module Regions',self.show_planned_floorplan)]
         for offset in range(0,len(controls),4):
             buttons=QHBoxLayout()
@@ -894,7 +902,7 @@ class Window(QMainWindow):
                 b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
             v.addLayout(buttons)
         self.physical_message=QPlainTextEdit();self.physical_message.setReadOnly(True)
-        self.physical_message.setPlainText('Physical design prerequisites:\n1. Compile & verify DLS\n2. Install Yosys + LibreLane (WSL2 or supported Linux)\n3. Configure licensed or open PDK and standard cells\n4. Run synthesis, placement, routing and physical verification\n5. Inspect actual GDSII/OASIS in KLayout, or render a read-only GDS geometry preview\n\nA gate-level DLS file alone is not a manufacturing mask.')
+        self.physical_message.setPlainText('Two-stage physical workflow:\n1. Generate Physical Layout: compile, synthesize, place, route and stream GDS. Stop before DRC/LVS.\n2. Verify Existing Layout: resume LibreLane checks from the stored layout (no new synthesis/routing).\n\nCO module region previews are GUIDE ONLY in r6/r7: flattened transactional hardware has no enforced physical module fences.\n\nNamed GDS layers require the selected PDK KLayout .lyp palette. PICADS will try to load it from the installed SKY130 PDK.\n\nNo GDS alone establishes manufacturability.')
         v.addWidget(self.physical_message)
         self.physical_layout=v
         self.mask_svg_widget=None
@@ -980,6 +988,22 @@ class Window(QMainWindow):
         except Exception as exc:
             QMessageBox.critical(self,'Physical preflight failed',f'{type(exc).__name__}: {exc}')
 
+    def open_latest_in_klayout(self):
+        """Open the current real GDS with the selected PDK's named layer palette."""
+        manifest_file=self.root/'build'/'latest'/'layout_artifacts.json'
+        if not manifest_file.is_file():
+            QMessageBox.information(self,'No latest GDS','Generate a physical layout first.')
+            return
+        try:
+            manifest=json.loads(manifest_file.read_text(encoding='utf-8'))
+            build=(self.root/'build'/'latest').resolve()
+            path=(build/manifest['gds_relative_to_build']).resolve()
+            if not path.is_relative_to(build) or not path.is_file():
+                raise ValueError('The recorded GDS file is missing or its path is invalid.')
+            self._open_in_klayout(path)
+        except (OSError,KeyError,ValueError,json.JSONDecodeError) as exc:
+            QMessageBox.warning(self,'Cannot open latest layout',str(exc))
+
     def latest_layout(self):
         """Open the actual, current GDS without asking users to find nested run files."""
         manifest_file=self.root/'build'/'latest'/'layout_artifacts.json'
@@ -1043,34 +1067,44 @@ class Window(QMainWindow):
     def open_mask(self):
         file,_=QFileDialog.getOpenFileName(self,'Open physical layout',str(self.root/'build'), 'Chip layout (*.gds *.gdsii *.oas *.oasis);;All files (*)')
         if not file:return
-        path=resolve_tool('klayout')
-        if not path:
-            QMessageBox.warning(self,'Missing KLayout','KLayout was not found. Open Settings → External dependencies and choose its application or installation folder.');return
-        try:subprocess.Popen([path,file],env=dependency_environment(tool='klayout'))
-        except OSError as exc:QMessageBox.critical(self,'KLayout launch failed',str(exc))
+        self._open_in_klayout(Path(file))
 
     def _build_page(self):
         w=QWidget();v=QVBoxLayout(w)
         row=QHBoxLayout()
-        for name,mode in [('Generate & Verify DLS','compile'),('Synthesize with Yosys','build'),('Physical Flow / LibreLane','physical')]:
+        for name,mode in [('Compile + Verify DLS','compile'),('Synthesize','build'),('1. Generate GDS','layout'),('2. Verify GDS','verify_layout')]:
             button=QPushButton(name);button.clicked.connect(lambda checked=False,m=mode:self.build(m));row.addWidget(button)
         v.addLayout(row)
-        v.addWidget(QLabel('Execution status is evidence-based: PASS / FAIL / BLOCKED / UNAVAILABLE; never simulated signoff.'))
+        v.addWidget(QLabel('Layout generation stops after GDS stream-out. Verification resumes from the existing run without re-placing cells. CO region previews are not enforced placement.'))
         split=QSplitter(Qt.Orientation.Horizontal)
         self.stage_list=QTreeWidget();self.stage_list.setHeaderLabels(['Stage','Status','Blocked by issue ID']);split.addWidget(self.stage_list)
         self.artifacts=QTreeWidget();self.artifacts.setHeaderLabels(['Artifact','Path']);self.artifacts.itemDoubleClicked.connect(self.open_artifact);split.addWidget(self.artifacts)
         v.addWidget(split)
         return w
+    def _open_in_klayout(self,gds:Path):
+        viewer=resolve_tool('klayout')
+        if not viewer:
+            QMessageBox.warning(self,'KLayout unavailable','Register KLayout in Settings > External Dependencies.')
+            return
+        try:
+            cfg=open_project(self.root,IssueCollector())
+            physical=(cfg.config.get('physical') or {}) if cfg else {}
+            tool=(cfg.config.get('tools') or {}) if cfg else {}
+            palette=acquire_lyp(self.root,pdk=physical.get('pdk','sky130A'),
+                                pdk_root=physical.get('pdk_root'),
+                                distribution=tool.get('wsl_distribution','Ubuntu'))
+            subprocess.Popen(klayout_open_argv(viewer,gds,palette=palette),
+                             env=dependency_environment(tool='klayout'))
+            if not palette:
+                self.statusBar().showMessage('KLayout opened, but no PDK .lyp layer palette was found. Select SKY130 technology in KLayout.')
+        except (OSError,ValueError) as exc:
+            QMessageBox.warning(self,'KLayout launch failed',str(exc))
+
     def open_artifact(self,item,col):
         path=Path(item.data(0,Qt.ItemDataRole.UserRole) or '')
         if path.is_file() and path.suffix in ('.v','.dls','.json','.log','.txt'):self.open_editor(path)
         elif path.is_file() and path.suffix in ('.gds','.gdsii'):
-            viewer=resolve_tool('klayout')
-            if viewer:
-                try:subprocess.Popen([viewer,str(path)],env=dependency_environment(tool='klayout'))
-                except OSError as exc:QMessageBox.warning(self,'KLayout launch failed',str(exc))
-            else:
-                QMessageBox.information(self,'KLayout unavailable','Register the optional KLayout viewer in External Dependencies, or use Latest GDS / Mask Layers for an SVG preview.')
+            self._open_in_klayout(path)
 
     def _settings_page(self):
         w=QWidget();v=QVBoxLayout(w)

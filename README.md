@@ -1,3 +1,14 @@
+## v0.16.8r7 — separated GDS generation, deferred verification, named SKY130 layers
+
+Physical generation and post-layout verification now have separate GUI actions
+and CLI modes (`layout` and `verify_layout`). The first stops LibreLane after
+GDS stream-out; the second resumes the same saved run to perform DRC/LVS and
+other checks without re-synthesizing or re-routing. The KLayout launcher loads
+the selected PDK `.lyp` when available so layer names are shown. **The CO
+module floorplan remains a GUIDE ONLY**: Apollo and Tiny8 have flattened
+transactional circuits, and this update does not add physically enforced
+module fences. See [two-stage physical workflow and limitations](docs/TWO_STAGE_LAYOUT_AND_NAMED_LAYERS_v0.16.8r7.md).
+
 ## v0.16.8r6 — CO module region guides, ABC AIG export, explicit power grid
 
 PICADS can now produce nested CO-driven architectural region guides (`module_floorplan.json` and scalable SVG), optionally export ABC-optimized AIGER after Yosys, and explicitly configure and inspect a PDK-driven power/ground distribution grid in LibreLane. **Region guides are not actual enforced placement**; Apollo's transactional design remains flattened, and manufacturing signoff is not established. See [module planning](docs/MODULE_FLOORPLANNING.md) and [ABC AIG and power-grid reference](docs/ABC_AIG_AND_POWER_GRID_v0.16.8r6.md).

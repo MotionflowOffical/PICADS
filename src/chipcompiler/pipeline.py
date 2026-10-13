@@ -38,13 +38,13 @@ class BuildSession:
         self.root=Path(root).resolve();self.mode=mode
         self.out=Path(build_dir).resolve() if build_dir else self.root/'build'/'latest'
         previous=None
-        if build_dir is None and self.out.is_dir() and any(self.out.iterdir()):
+        if mode != 'verify_layout' and build_dir is None and self.out.is_dir() and any(self.out.iterdir()):
             history=self.root/'build'/'history';history.mkdir(parents=True,exist_ok=True)
             name=datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S%fZ')+'-'+uuid.uuid4().hex[:6]
             previous=history/name
             self.out.rename(previous)
         self.out.mkdir(parents=True,exist_ok=True)
-        self.issues=IssueCollector();self.events=EventLog(self.out/'events.jsonl')
+        self.issues=IssueCollector();self.events=EventLog(self.out/('layout_verification_events.jsonl' if mode=='verify_layout' else 'events.jsonl'))
         self.result=BuildResult(str(self.root),mode,run_id=self.events.run_id)
         if previous:self.result.files['previous_build_archive']=str(previous)
         self.project=None;self.dls=None
@@ -60,7 +60,9 @@ class BuildSession:
         self._done(stage,'BLOCKED',upstream_issue_ids=issue.blocked_by)
 
     def run(self)->BuildResult:
-        try:self._run()
+        try:
+            if self.mode=='verify_layout':self._verify_existing_layout()
+            else:self._run()
         except DiagnosticException as e:
             self.events.emit('pipeline','stopped_expected',issue_id=e.issue.issue_id)
         except Exception as exc:
@@ -83,9 +85,14 @@ class BuildSession:
             self.result.status=('FAILED' if self.issues.errors else
                                 'INCOMPLETE' if any(s in ('UNAVAILABLE','BLOCKED','SKIPPED','FAIL') for s in statuses)
                                 else 'SUCCESS_WITH_WARNINGS' if self.issues.warnings else 'SUCCESS')
-            self.result.files['report']=str(self.out/'report.json')
-            self.result.files['events']=str(self.out/'events.jsonl')
-            atomic_write(self.out/'report.json',json.dumps(self.result.as_dict(),indent=2,default=str))
+            if not self.issues.errors and self.mode=='layout' and self.result.stages.get('physical',{}).get('status')=='PASS':
+                self.result.status='LAYOUT_GENERATED_UNVERIFIED'
+            elif not self.issues.errors and self.mode=='verify_layout' and self.result.stages.get('verification',{}).get('status')=='PASS':
+                self.result.status='VERIFIED_REPORTED_CHECKS_NOT_FOUNDRY_SIGNOFF'
+            report_file=self.out/('layout_verification_report.json' if self.mode=='verify_layout' else 'report.json')
+            self.result.files['report']=str(report_file)
+            self.result.files['events']=str(self.out/('layout_verification_events.jsonl' if self.mode=='verify_layout' else 'events.jsonl'))
+            atomic_write(report_file,json.dumps(self.result.as_dict(),indent=2,default=str))
             self.events.emit('pipeline','finished',status=self.result.status,errors=len(self.issues.errors),warnings=len(self.issues.warnings))
         return self.result
 
@@ -99,6 +106,11 @@ class BuildSession:
             return
         self._done('project','PASS' if len(self.issues.errors)==before else 'FAIL',
                    name=self.project.name,top=self.project.top,source_kind=self.project.source_kind)
+        if self.mode=='layout':
+            # Ensure the deferred software/RTL equivalence test uses exactly
+            # the source compiled into the saved GDS, not later editor changes.
+            atomic_write(self.out/'layout_source_snapshot.py',self.project.source)
+            self.result.files['layout_source_snapshot']=str(self.out/'layout_source_snapshot.py')
         if self.project.translation:
             normalized=self.out/'normalized_source.py'
             atomic_write(normalized,self.project.source)
@@ -307,15 +319,15 @@ class BuildSession:
                     child=HardwareCompiler(self.issues,self.project.co).compile_source(
                         self.project.source,str(self.project.source_file),fn)
                     child_path=modules_dir/(fn+'.dls');child.save(child_path)
-                    child_report=verify(self.project.source,child,self.issues)
-                    atomic_write(modules_dir/(fn+'.verification.json'),json.dumps(child_report.as_dict(),indent=2))
-                    if child_report.status in ('FAIL','ERROR'):
+                    child_report=verify(self.project.source,child,self.issues) if self.mode!='layout' else None
+                    if child_report:atomic_write(modules_dir/(fn+'.verification.json'),json.dumps(child_report.as_dict(),indent=2))
+                    if child_report and child_report.status in ('FAIL','ERROR'):
                         children[fn]={'status':'FAIL','path':str(child_path),
                             'verification':str(modules_dir/(fn+'.verification.json'))}
                     else:
                         child_rtl=modules_dir/(fn+'.v');export_verilog(child,child_rtl)
                         children[fn]={'status':'PASS','dls':str(child_path),'verilog':str(child_rtl),
-                            'verification':child_report.status,'stats':child.stats()}
+                            'verification':child_report.status if child_report else 'DEFERRED','stats':child.stats()}
                 except DiagnosticException as exc:
                     children[fn]={'status':'FAIL','issue_id':exc.issue.issue_id}
                 except Exception as exc:
@@ -349,14 +361,17 @@ class BuildSession:
             self._done('generate','FAIL',issue_id=i.issue_id)
             self._block('equivalence',i);self._block('export',i)
             return
-        self.events.emit('equivalence','start')
-        report=verify(self.project.source,self.dls,self.issues)
-        atomic_write(self.out/'equivalence.json',json.dumps(report.as_dict(),indent=2))
-        self.result.files['equivalence']=str(self.out/'equivalence.json')
-        self._done('equivalence',report.status,vectors=report.vectors,exhaustive=report.exhaustive)
-        if report.status in ('ERROR','FAIL'):
-            self._block('export',self.issues.errors[-1]);return
-        native=(self.project.config.get('verification') or {}).get('native_c',False)
+        if self.mode=='layout':
+            self._done('equivalence','DEFERRED',reason='Use Verify Existing Layout; no sampled DLS equivalence during initial GDS generation')
+        else:
+            self.events.emit('equivalence','start')
+            report=verify(self.project.source,self.dls,self.issues)
+            atomic_write(self.out/'equivalence.json',json.dumps(report.as_dict(),indent=2))
+            self.result.files['equivalence']=str(self.out/'equivalence.json')
+            self._done('equivalence',report.status,vectors=report.vectors,exhaustive=report.exhaustive)
+            if report.status in ('ERROR','FAIL'):
+                self._block('export',self.issues.errors[-1]);return
+        native=(self.project.config.get('verification') or {}).get('native_c',False) and self.mode!='layout'
         if native and self.project.translation and self.dls.metadata.get('schedule'):
             self.issues.add('C.NATIVE_SCHEDULE_UNSUPPORTED','WARNING','VERIFIER','native_reference',
                'Native reference testing does not yet understand the START/READY/DONE scheduled protocol.',
@@ -385,7 +400,7 @@ class BuildSession:
                               cause='Generated DLS could not be serialized into structural Verilog.',
                               remedy='Inspect DLS ports and gate names.')
             self._done('export','FAIL',issue_id=i.issue_id);return
-        if (self.project.config.get('verification') or {}).get('external_rtl',False):
+        if self.mode!='layout' and (self.project.config.get('verification') or {}).get('external_rtl',False):
             from .rtl_check import check_rtl
             toolconf=self.project.config.get('tools') or {}
             opts={'runner':toolconf.get('execution','native'),
@@ -400,12 +415,12 @@ class BuildSession:
                     self._block('physical',outcome.get('issue_id'))
                 return
             self.result.files['rtl_verification']=str(self.out/'rtl_verification.json')
-        if self.mode not in ('build','physical'):return
+        if self.mode not in ('build','physical','layout'):return
         return self._run_native_flow(rtl)
 
     def _run_native_flow(self,rtl):
         # Optional external dependencies are actual required steps in build mode, not silent fallbacks.
-        if self.mode == 'physical':
+        if self.mode in ('physical','layout'):
             physical_options = self.project.config.get('physical') or {}
             if not isinstance(physical_options, dict) or not physical_options.get('enabled'):
                 issue = self.issues.add('PHYSICAL.DISABLED', 'ERROR', 'CONFIG', 'physical',
@@ -482,7 +497,7 @@ class BuildSession:
                        physical_input='Original RTL; LibreLane performs PDK-specific ABC mapping')
         self.result.files['synthesized_netlist']=str(synthesized)
         self.events.emit('yosys','artifact_verified',path=str(synthesized),bytes=synthesized.stat().st_size)
-        if self.mode!='physical':return
+        if self.mode not in ('physical','layout'):return
         config=self.project.config.get('physical') or {}
         if not isinstance(config,dict):config={}
         if not config.get('enabled',False):
@@ -543,7 +558,9 @@ class BuildSession:
             root_arg=(str(config['pdk_root']) if backend=='wsl' else
                       str(Path(config['pdk_root']).expanduser().resolve()))
             cmd.extend(['--pdk-root',root_arg])
-        cmd += ['--pdk',str(config['pdk']),'--run-tag',tag,'config.json']
+        cmd += ['--pdk',str(config['pdk']),'--run-tag',tag]
+        if self.mode=='layout':cmd += ['--to','KLayout.StreamOut']
+        cmd += ['config.json']
         result=run_external(cmd,self.out,self.out,self.issues,self.events,'physical',timeout=int(config.get('timeout_s',3600)),**opts)
         if not verify_handoff_inputs(manifest):
             i=self.issues.add('PHYSICAL.INPUTS_CHANGED','ERROR','FILESYSTEM','physical',
@@ -566,8 +583,10 @@ class BuildSession:
             self.result.files['gds'] = str(selected)
             gds_info = inspect_gds(selected)
             manifest_path = self.out/'layout_artifacts.json'
+            from .physical_flow import artifact_hash
             manifest = {
                 'schema': 1, 'status': 'LAYOUT_GENERATED_NOT_MASK_SIGNOFF',
+                'gds_sha256': artifact_hash(selected),
                 'gds': str(selected),
                 'gds_relative_to_build': str(selected.relative_to(self.out)),
                 'run_tag': tag, 'top': name,
@@ -577,13 +596,24 @@ class BuildSession:
             atomic_write(manifest_path,json.dumps(manifest,indent=2))
             self.result.files['layout_layers'] = str(manifest_path)
         self.events.emit('physical','inspect_artifacts',**evidence.as_dict())
-        if evidence.status=='FAIL':
+        if evidence.status=='FAIL' and self.mode!='layout':
             i=self.issues.add('PHYSICAL.ARTIFACT_INVALID','ERROR','PHYSICAL','physical',
                 'LibreLane returned zero, but output GDS is missing or a reported physical check failed.',
                 evidence=evidence.as_dict(),cause='Expected physical output is missing or noncompliant.',
                 remedy='Inspect the exact LibreLane run directory and final metrics; do not reuse an old GDS.')
             self._done('physical','FAIL',issue_id=i.issue_id,evidence=str(self.out/'physical_evidence.json'))
             self._block('signoff',i);return
+        if self.mode=='layout':
+            if not evidence.gds or evidence.checks.get('expected_top',{}).get('status')!='PASS':
+                i=self.issues.add('PHYSICAL.LAYOUT_NOT_FOUND','ERROR','PHYSICAL','physical',
+                    'Partial LibreLane run ended, but no usable GDS with the expected top was found.',
+                    remedy='Inspect physical.log, the run step outputs, and the selected stream-out stage.')
+                self._done('physical','FAIL',issue_id=i.issue_id);return
+            self._done('physical','PASS',gds=evidence.gds,
+                       flow_stop='KLayout.StreamOut',verification='NOT_PERFORMED',
+                       floorplan_enforcement='GUIDE_ONLY' if 'module_floorplan' in self.result.files else 'NOT_REQUESTED')
+            self._done('signoff','DEFERRED',reason='Select Verify Existing Layout to resume LibreLane checks')
+            return
         self._done('physical','PASS',evidence=str(self.out/'physical_evidence.json'),gds=evidence.gds,
                    checks=evidence.checks)
         missing=[k for k,v in evidence.checks.items() if v['status']=='UNVERIFIED']
@@ -596,6 +626,110 @@ class BuildSession:
             cause='PDK/foundry mask data and exhaustive signoff evidence are not certified by Chip Compiler.',
             remedy='Qualify every required DRC/LVS/timing/corner/antenna/power check and mask preparation with your PDK.')
         self._done('signoff','UNAVAILABLE',reason='Foundry-qualified independent signoff not established')
+
+    def _verify_existing_layout(self):
+        """Resume post-stream-out checks without re-generating or overwriting RTL/GDS.
+
+        Source changes after generation do not alter the design under test;
+        the saved handoff is hashed and checked before LibreLane resumes.
+        """
+        from .physical_flow import verify_handoff_inputs
+        prior_file=self.out/'report.json'
+        layout_file=self.out/'layout_artifacts.json'
+        handoff_file=self.out/'physical_handoff.json'
+        if not (prior_file.is_file() and layout_file.is_file() and handoff_file.is_file()):
+            i=self.issues.add('VERIFY.NO_LAYOUT','ERROR','CONFIG','verification',
+                'No PICADS-produced physical layout and input handoff available in build/latest.',
+                remedy='Generate Physical Layout first, then run Verify Existing Layout.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        previous=json.loads(prior_file.read_text(encoding='utf-8'))
+        manifest=json.loads(layout_file.read_text(encoding='utf-8'))
+        handoff=json.loads(handoff_file.read_text(encoding='utf-8'))
+        if previous.get('mode')!='layout' or previous.get('stages',{}).get('physical',{}).get('status')!='PASS':
+            i=self.issues.add('VERIFY.NOT_PARTIAL_LAYOUT','ERROR','CONFIG','verification',
+                'The latest layout was not produced by the separately resumable layout workflow.',
+                remedy='Generate Physical Layout using the new button first; older full runs are not resumable here.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        gds=(self.out/manifest['gds_relative_to_build']).resolve()
+        if not gds.is_relative_to(self.out.resolve()) or not gds.is_file():
+            i=self.issues.add('VERIFY.LAYOUT_MISSING','ERROR','FILESYSTEM','verification',
+                'Previously generated GDS was moved or removed. Rebuild the layout.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        from .physical_flow import artifact_hash
+        if manifest.get('gds_sha256')!=artifact_hash(gds):
+            i=self.issues.add('VERIFY.GDS_CHANGED','ERROR','FILESYSTEM','verification',
+                'The saved GDS differs from the original layout artifact.',
+                remedy='Regenerate the layout to verify the correct original geometry.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        if not verify_handoff_inputs(handoff):
+            i=self.issues.add('VERIFY.INPUT_CHANGED','ERROR','FILESYSTEM','verification',
+                'The original netlist or PDK configuration changed since GDS generation.',
+                remedy='Regenerate layout before verifying so checks match the design.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        self._done('layout_reuse','PASS',gds=str(gds),bytes=gds.stat().st_size,
+                   no_resynthesis=True,no_replacement_of_gds=True)
+        prior_tag=manifest['run_tag']
+        from .project import open_project
+        self.project=open_project(self.root,self.issues)
+        if self.project is None:return
+        dls_path=Path(previous.get('files',{}).get('dls',''))
+        snapshot=self.out/'layout_source_snapshot.py'
+        if dls_path.is_file() and snapshot.is_file():
+            original=snapshot.read_text(encoding='utf-8')
+            dls=DLS.load(dls_path)
+            functional=verify(original,dls,self.issues)
+            functional_path=self.out/'layout_verification_equivalence.json'
+            atomic_write(functional_path,json.dumps(functional.as_dict(),indent=2))
+            self.result.files['dls']=str(dls_path)
+            self.result.files['equivalence']=str(functional_path)
+            self._done('equivalence',functional.status,vectors=functional.vectors,exhaustive=functional.exhaustive,
+                       provenance='saved source snapshot + saved DLS')
+            if functional.status in ('FAIL','ERROR'):
+                i=self.issues.add('VERIFY.FUNCTIONAL_FAIL','ERROR','VERIFIER','equivalence',
+                    'The saved generated DLS failed source equivalence. Physical verification not run.')
+                self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        else:
+            i=self.issues.add('VERIFY.SOURCE_SNAPSHOT_MISSING','ERROR','FILESYSTEM','equivalence',
+                 'Saved source snapshot or DLS is missing, so separate functional verification is not possible.',
+                 remedy='Regenerate the layout with the two-stage workflow.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        settings=self.project.config.get('physical') or {}
+        if settings.get('pdk')!=handoff.get('pdk'):
+            i=self.issues.add('VERIFY.PDK_CHANGED','ERROR','CONFIG','verification',
+                'The configured project PDK differs from the PDK used to generate the existing GDS.',
+                remedy='Restore the original PDK setting or regenerate the layout.')
+            self._done('verification','BLOCKED',issue_id=i.issue_id);return
+        backend=(self.project.config.get('tools') or {}).get('execution','native')
+        distro=(self.project.config.get('tools') or {}).get('wsl_distribution')
+        options={'runner':backend,'wsl_distribution':distro} if backend=='wsl' else {}
+        cmd=['librelane']+(['--dockerized'] if backend=='wsl' or settings.get('dockerized') else [])
+        if settings.get('pdk_root'):
+            cmd+=['--pdk-root',str(settings['pdk_root'])]
+        cmd+=['--pdk',str(settings.get('pdk','sky130A')),'--run-tag',prior_tag,
+              '--from','KLayout.Render','config.json']
+        self._done('verification_resume','RUNNING',start='KLayout.Render',run_tag=prior_tag,
+                   existing_layout=str(gds))
+        result=run_external(cmd,self.out,self.out,self.issues,self.events,'layout_verification',
+                            timeout=int(settings.get('timeout_s',3600)),**options)
+        if result['status']!='PASS':
+            self._done('verification','FAIL',**{k:v for k,v in result.items() if k!='status'})
+            return
+        if not gds.exists() or artifact_hash(gds)!=manifest.get('gds_sha256'):
+            i=self.issues.add('VERIFY.LAYOUT_REMOVED','ERROR','FILESYSTEM','verification',
+                'Verification unexpectedly removed the original GDS. Check the run directory.')
+            self._done('verification','FAIL',issue_id=i.issue_id);return
+        evidence=inspect_librelane(self.out/'runs'/prior_tag,expected_top=manifest['top'])
+        file=self.out/'layout_verification_evidence.json'
+        atomic_write(file,json.dumps(evidence.as_dict(),indent=2))
+        self.result.files['verification_evidence']=str(file)
+        if evidence.status=='FAIL':
+            i=self.issues.add('VERIFY.PHYSICAL_CHECK_FAIL','ERROR','PHYSICAL','verification',
+                'LibreLane verification reported a failed check or missing required layout.',
+                evidence=evidence.as_dict())
+            self._done('verification','FAIL',issue_id=i.issue_id);return
+        self._done('verification','PASS' if all(c['status']=='PASS' for k,c in evidence.checks.items()
+                    if k in ('drc_klayout','drc_magic','lvs','antenna')) else 'PARTIAL',
+                   checks=evidence.checks,foundry_signoff='NOT_CERTIFIED')
 
     def _run_source_processes(self):
         """Compile separate source-defined transactional FSMs that run concurrently.

@@ -31,7 +31,7 @@ def main(argv=None)->int:
     ap=argparse.ArgumentParser(prog='picads',description='PICADS procedural integrated circuit design and automation')
     ap.add_argument('--version',action='version',version=__version__)
     commands=ap.add_subparsers(dest='command',required=True)
-    for c in ('compile','build','physical','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight','configure-physical'):
+    for c in ('compile','build','physical','layout','verify_layout','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight','configure-physical'):
         sp=commands.add_parser(c)
         if c not in ('doctor',):sp.add_argument('project',nargs='?',default='.')
         if c=='configure-physical':
