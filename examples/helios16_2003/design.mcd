@@ -1,0 +1,6 @@
+source: circuit.py
+top: helios16_reference
+modules:
+  - name: Helios16ALUReference
+    function: helios16_reference
+    purpose: Python-only subset functional model; physical CPU uses separate modular RTL.

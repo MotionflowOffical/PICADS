@@ -1,0 +1,63 @@
+# HELIOS-16 / year-2003-inspired 130 nm embedded RISC.
+# Docker Desktop must be open and running, with Ubuntu WSL integration enabled.
+# RTL CPU is physically independent of the Python ALU reference.
+architecture:
+  adder: ripple
+schedule:
+  mode: transactional
+  latencies: {READ: 1, WRITE: 1}
+allocation:
+  sharing: auto
+synthesis:
+  abc_aig: true
+physical_macros:
+  enabled: true
+  enforcement: required
+  top_module: helios16_top
+  top_rtl: rtl/helios16_top.v
+  halo_um: 6
+  placement:
+    mode: compact            # GUI Save -> manual. Regenerate GDS afterwards.
+    region_um: [30, 30, 1180, 980]  # modules cannot leave this zone
+    stayouts_um:             # reserved area, cannot enter even when dragging
+      - [545, 485, 610, 570]
+  spacing:
+    min_um: 20
+    preferred_um: 30
+    max_um: 95
+  blocks:
+    - name: ProgramStore
+      module: helios16_program
+      instance: u_program
+      rtl: rtl/helios16_program.v
+      clock_port: clk
+      die_size_um: [390, 340]
+    - name: DataScratchpad
+      module: helios16_data
+      instance: u_data
+      rtl: rtl/helios16_data.v
+      clock_port: clk
+      die_size_um: [310, 295]
+    - name: CPUControl
+      module: helios16_control
+      instance: u_control
+      rtl: rtl/helios16_control.v
+      clock_port: clk
+      die_size_um: [260, 210]
+    - name: RegisterFile
+      module: helios16_registers
+      instance: u_registers
+      rtl: rtl/helios16_registers.v
+      clock_port: clk
+      die_size_um: [195, 165]
+    - name: ArithmeticLogic
+      module: helios16_alu
+      instance: u_alu
+      rtl: rtl/helios16_alu.v
+      die_size_um: [165, 140]
+    - name: Peripherals
+      module: helios16_io
+      instance: u_io
+      rtl: rtl/helios16_io.v
+      clock_port: clk
+      die_size_um: [225, 175]

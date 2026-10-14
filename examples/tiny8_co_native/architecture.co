@@ -1,4 +1,6 @@
 # Tiny8 native PICADS project. No external scripts or generated outputs.
+# Before Generate Physical Layout, START Docker Desktop and enable
+# Settings > Resources > WSL Integration > Ubuntu. Keep the engine running.
 # Python transactional CPU = DLS/functional reference.
 # The CO-selected modular RTL is an independent physical implementation;
 # sequential equivalence is not yet established by PICADS.
@@ -24,6 +26,8 @@ physical_macros:
   top_module: tiny8_modular_top
   top_rtl: rtl/tiny8_modular_top.v
   halo_um: 5
+  placement:
+    mode: compact  # compact | row | manual; manual requires each block location_um
   spacing:
     min_um: 20
     preferred_um: 30

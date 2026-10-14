@@ -19,6 +19,8 @@ physical_macros:
   top_module: tiny8_modular_top
   top_rtl: rtl/tiny8_modular_top.v
   halo_um: 5
+  placement:
+    mode: compact  # compact (default), row, or manual
   spacing:
     min_um: 20
     preferred_um: 30
@@ -45,7 +47,7 @@ physical_macros:
 
 `chip.yaml` must also define `physical.enabled: true`, a supported PDK (for this example `sky130A`), a `clock_period_ns`, and a usable LibreLane tool execution backend (`tools.execution: wsl`, `tools.wsl_distribution: Ubuntu` on Windows).
 
-The `top_rtl` file must instantiate each required `module instance(...)` with unique names. All paths must remain within the opened project folder. Only 2–32 top-level blocks with unique module types are supported in this initial native backend. Required blocks are packed along a deterministic horizontal row, and their positions are calculated from the hardened LEF dimensions with the CO preferred gap. Nesting, generic synthesized standard-cell fences, and non-rectangular regions are **not** implemented.
+The `top_rtl` file must instantiate each required `module instance(...)` with unique names. All paths must remain within the opened project folder. Only 2–32 top-level blocks with unique module types are supported in this initial native backend. Required blocks are now packed using actual hardened LEF dimensions, with `placement.mode: compact` (automatic deterministic two-dimensional shelf packing by bounding area/perimeter), `row` (previous arrangement), or `manual` (each block must declare `location_um: [x,y]`). The CO minimum clearance and nearest-neighbor maximum gap are validated on the planned rectangles and on placed DEF coordinates. The physical optimizer is heuristic, not globally optimal or net-aware; nesting, generic synthesized standard-cell fences, and non-rectangular regions remain unsupported.
 
 ## What the normal buttons do
 
@@ -77,3 +79,11 @@ The generated GDS is **not** a certified mask and passing structural placement c
 ## r9b hierarchical PDN correction
 
 Submacro hardening now explicitly sets `PDN_MULTILAYER: false` and `PDN_ENABLE_PINS: true`; the parent sets `PDN_MULTILAYER: true` and power-strap pitches chosen relative to the smallest macro dimensions. All macro LEF views must expose `VPWR`/`VGND` physical pin geometry. A failed top run writes `co_macros/pdn_diagnostics.json`. Do not claim signoff if the top-level grid is disconnected.
+
+## r9c viewer / dependency updates
+
+Docker Desktop must **already be running** with WSL Integration enabled for the Ubuntu distribution. A `docker` command not found in Ubuntu does not imply PICADS source is invalid. Start Docker Desktop and verify `wsl -d Ubuntu --exec docker info` before rerunning a physical layout.
+
+The KLayout GUI opens GDS with a generated palette containing exactly the actual observed `layer/datatype@1` sources. This prevents empty named PDK entries from misleading the user while the real numeric GDS layers remain visible. Labels and pin/text purposes default to hidden; visibility toggles now reference the real GDS layer purpose. The generated palette is display-only and the source GDS is untouched. Unknown pairs remain clearly marked as unmapped.
+
+A **CO Macro Placement Plan** preview is generated after macro hardening and displayed in the GUI. The preview uses LEF geometry and indicates planned coordinates; it is not a physical signoff claim. The final DEF/GDS module verification still runs. The space outside macro boundaries contains parent-level power/signal routing and may contain support standard cells or textual GDS elements.

@@ -14,6 +14,7 @@ import math
 from pathlib import Path
 import re
 import shutil
+from html import escape
 
 from .project import safe_path, atomic_write
 from .physical import inspect_librelane
@@ -50,11 +51,43 @@ def _load_rtl(root, value, label):
     return file
 
 
-def read_macro_constraints(raw, project_root, physical):
+def _placement_rect(value, label):
+    """Physical x0,y0,x1,y1 in micrometres; not a screen-space region."""
+    if (not isinstance(value, (list, tuple)) or len(value) != 4 or
+        any(isinstance(v, bool) or not isinstance(v, (int, float)) or
+            not math.isfinite(v) or v < 0 for v in value) or
+        value[2] <= value[0] or value[3] <= value[1]):
+        raise MacroConstraintError(f'CO.MACROS_ZONE: {label} must be [x0,y0,x1,y1] in um')
+    return [float(v) for v in value]
+
+
+def check_macro_placement_zones(rows, *, region_um=None, stayouts_um=(), halo_um=0):
+    """Shared safety rule used by CO layout synthesis and the drag editor.
+
+    A stay-out is an exclusion rectangle; its halo must be clear of the
+    entire macro body. No successful save or physical build can bypass it.
+    """
+    for row in rows:
+        x,y=row['x_um'],row['y_um']
+        x2,y2=x+row['width_um'],y+row['height_um']
+        if region_um is not None:
+            rx,ry,rx2,ry2=region_um
+            if x < rx-1e-6 or y < ry-1e-6 or x2 > rx2+1e-6 or y2 > ry2+1e-6:
+                raise MacroConstraintError(f'CO.MACROS_REGION: {row["instance"]} is outside required placement region')
+        for index,(kx,ky,kx2,ky2) in enumerate(stayouts_um):
+            # A diagonal escape is permitted only when the expanded rectangles
+            # no longer overlap in either Cartesian dimension.
+            if x < kx2+halo_um-1e-6 and x2 > kx-halo_um+1e-6 and \
+               y < ky2+halo_um-1e-6 and y2 > ky-halo_um+1e-6:
+                raise MacroConstraintError(f'CO.MACROS_STAYOUT: {row["instance"]} intersects stay-out #{index+1} (halo {halo_um:g} um)')
+    return True
+
+
+def read_macro_constraints(raw, project_root, physical, floorplan=None):
     """Read strict, reusable CO specification without invoking EDA tools."""
     if not isinstance(raw, dict) or raw.get('enabled') is not True:
         raise MacroConstraintError('CO.MACROS_CONFIG: physical_macros.enabled must be true')
-    allowed = {'enabled', 'enforcement', 'top_module', 'top_rtl', 'blocks', 'spacing', 'halo_um'}
+    allowed = {'enabled', 'enforcement', 'top_module', 'top_rtl', 'blocks', 'spacing', 'halo_um', 'placement'}
     if set(raw) - allowed:
         raise MacroConstraintError('CO.MACROS_UNKNOWN: ' + ', '.join(sorted(set(raw)-allowed)))
     if raw.get('enforcement') != 'required':
@@ -75,12 +108,35 @@ def read_macro_constraints(raw, project_root, physical):
     if not minimum <= preferred <= maximum:
         raise MacroConstraintError('CO.MACROS_SPACING: require min <= preferred <= max')
     halo = _positive(raw.get('halo_um', 5), 'halo_um', low=-1)
+    placement = raw.get('placement', {'mode':'compact'})
+    if not isinstance(placement, dict) or set(placement)-{'mode','region_um','stayouts_um'}:
+        raise MacroConstraintError('CO.MACROS_PLACEMENT: expected placement: {mode: compact|row|manual}')
+    placement_mode = placement.get('mode', 'compact')
+    if placement_mode not in ('compact', 'row', 'manual'):
+        raise MacroConstraintError('CO.MACROS_PLACEMENT: mode must be compact, row or manual')
+    region = _placement_rect(placement['region_um'],'placement.region_um') if 'region_um' in placement else None
+    stayouts = placement.get('stayouts_um', [])
+    if not isinstance(stayouts,list):
+        raise MacroConstraintError('CO.MACROS_ZONE: placement.stayouts_um must be a list')
+    stayouts = [_placement_rect(v,f'placement.stayouts_um[{i}]') for i,v in enumerate(stayouts)]
+    # Reuse existing mandatory CO physical floorplan keepouts. These are
+    # placement exclusions and must not silently become only painted guides.
+    if isinstance(floorplan,dict):
+        for entry in floorplan.get('keepouts',[]):
+            if (isinstance(entry,dict) and entry.get('kind')=='hard' and
+                    entry.get('enforcement')=='required'):
+                stayouts.append(_placement_rect(entry.get('bounds_um'),
+                    'floorplan.keepouts.'+str(entry.get('name','unnamed'))))
+    if region is not None:
+        for i,(x,y,x2,y2) in enumerate(stayouts):
+            if x < region[0] or y < region[1] or x2 > region[2] or y2 > region[3]:
+                raise MacroConstraintError(f'CO.MACROS_ZONE: stay-out #{i+1} extends outside placement region')
     blocks = raw.get('blocks')
     if not isinstance(blocks, list) or len(blocks) < 2 or len(blocks) > 32:
         raise MacroConstraintError('CO.MACROS_BLOCKS: expected 2..32 real blocks')
     instances = set(); modules = set(); defined=[]
     for index, b in enumerate(blocks):
-        if not isinstance(b, dict) or set(b)-{'name','module','instance','rtl','die_size_um','clock_port'}:
+        if not isinstance(b, dict) or set(b)-{'name','module','instance','rtl','die_size_um','clock_port','location_um'}:
             raise MacroConstraintError(f'CO.MACROS_BLOCK: invalid block definition at index {index}')
         name = _id(b.get('name'), 'block.name')
         mod = _id(b.get('module'), 'block.module')
@@ -103,9 +159,21 @@ def read_macro_constraints(raw, project_root, physical):
         clock = b.get('clock_port', 'clk' if re.search(r'\binput\s+(?:wire\s+)?clk\b', match.group(1)) else None)
         if clock is not None:
             _id(clock, f'{name}.clock_port')
+        location = b.get('location_um')
+        if location is not None:
+            if not isinstance(location, list) or len(location)!=2 or any(
+                isinstance(v,bool) or not isinstance(v,(int,float)) or not math.isfinite(v) or v<0 for v in location
+            ):
+                raise MacroConstraintError(f'CO.MACROS_LOCATION: {name}.location_um must be [x,y] nonnegative microns')
+            location=[float(v) for v in location]
         defined.append({'name':name,'module':mod,'instance':inst,'rtl':rtl,'ports':match.group(1),
-                        'width':width,'height':height,'clock':clock})
-    return {'top':top,'top_rtl':top_rtl,'blocks':defined,'spacing':{'min_um':minimum,'preferred_um':preferred,'max_um':maximum},'halo_um':halo}
+                        'width':width,'height':height,'clock':clock,'location_um':location})
+    if placement_mode=='manual' and any(b['location_um'] is None for b in defined):
+        raise MacroConstraintError('CO.MACROS_LOCATION: manual placement requires location_um for every block')
+    if placement_mode!='manual' and any(b['location_um'] is not None for b in defined):
+        raise MacroConstraintError('CO.MACROS_LOCATION: location_um requires placement.mode: manual')
+    return {'top':top,'top_rtl':top_rtl,'blocks':defined,'spacing':{'min_um':minimum,'preferred_um':preferred,'max_um':maximum},
+            'halo_um':halo,'placement_mode':placement_mode,'placement_region_um':region,'placement_stayouts_um':stayouts}
 
 
 def read_lef_size(path, module):
@@ -150,16 +218,193 @@ def final_view(run, subdir, module, suffix):
     raise MacroConstraintError(f'CO.MACROS_VIEW: expected one {module} {subdir} view in {run}, found {len(candidates)}')
 
 
-def allocate_macro_rectangles(blocks, spacing, *, margin=30):
-    """Simple deterministic hard-macro row packing using actual LEF sizes."""
+def _rect_gap(a, b):
+    """Minimum Euclidean edge clearance of two axis-aligned macro rectangles."""
+    dx=max(0, a['x_um']-b['x_um']-b['width_um'], b['x_um']-a['x_um']-a['width_um'])
+    dy=max(0, a['y_um']-b['y_um']-b['height_um'], b['y_um']-a['y_um']-a['height_um'])
+    return math.hypot(dx,dy)
+
+
+def _validate_2d_clearance(rows, spacing):
+    low=spacing['min_um']; high=spacing['max_um']
+    for i,a in enumerate(rows):
+        neighbors=[]
+        for j,b in enumerate(rows):
+            if i==j:continue
+            gap=_rect_gap(a,b)
+            if gap < low-0.001:
+                raise MacroConstraintError(f'CO.MACROS_SPACING: {a["instance"]} and {b["instance"]} clearance {gap:.3f} um below minimum {low:.3f} um')
+            neighbors.append(gap)
+        if neighbors and min(neighbors)>high+0.001:
+            raise MacroConstraintError(f'CO.MACROS_SPACING: {a["instance"]} has no other macro within maximum {high:.3f} um')
+
+
+def _dimensioned_rect(block, x, y):
+    w,h=block['size_um']
+    return {'name':block['name'],'module':block['module'],'instance':block['instance'],
+            'x_um':round(x,4),'y_um':round(y,4),'width_um':w,'height_um':h}
+
+
+def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_um=None, stayouts_um=(), halo_um=0):
+    """Place real LEF-sized hard macros with selectable CO row/compact/manual mode.
+
+    Compact mode enumerates deterministic horizontal and vertical shelf layouts
+    in multiple orders and selects a balanced minimum-envelope arrangement.
+    This is a floorplan heuristic, not a claim of globally optimal routing.
+    The actual DEF is checked after LibreLane against the same coordinates.
+    """
+    if not blocks:
+        raise MacroConstraintError('CO.MACROS_BLOCKS: cannot place empty block list')
     gap=spacing['preferred_um']
-    x=float(margin); y=float(margin); out=[]
-    for b in blocks:
-        w,h=b['size_um']
-        out.append({'name':b['name'],'module':b['module'],'instance':b['instance'],
-                    'x_um':round(x,4),'y_um':round(y,4),'width_um':w,'height_um':h})
-        x+=w+gap
-    return out, [round(x-gap+margin,2),round(max(r['height_um'] for r in out)+2*margin,2)]
+
+    def die(rows):
+        return [round(max(r['x_um']+r['width_um'] for r in rows)+margin,2),
+                round(max(r['y_um']+r['height_um'] for r in rows)+margin,2)]
+
+    if mode=='manual':
+        rows=[]
+        for b in blocks:
+            xy=b.get('location_um')
+            if xy is None or (region_um is None and min(xy)<margin-1e-6):
+                raise MacroConstraintError('CO.MACROS_LOCATION: manual macro coordinates must respect the required die border')
+            rows.append(_dimensioned_rect(b,*xy))
+        _validate_2d_clearance(rows,spacing)
+        check_macro_placement_zones(rows,region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
+        return rows,die(rows)
+
+    if mode=='row':
+        x=float(margin);rows=[]
+        for b in blocks:
+            rows.append(_dimensioned_rect(b,x,float(margin)))
+            x+=b['size_um'][0]+gap
+        _validate_2d_clearance(rows,spacing)
+        check_macro_placement_zones(rows,region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
+        return rows,die(rows)
+
+    if mode!='compact':
+        raise MacroConstraintError('CO.MACROS_PLACEMENT: unsupported mode '+str(mode))
+
+    # Candidate positions are deterministic and reproduce on all platforms.
+    # Try height-first and width-first shelves. A 2D solution is selected when
+    # its envelope/perimeter improves on the old single-row approach.
+    import itertools
+    n=len(blocks)
+    orderings=list(itertools.permutations(range(n))) if n<=6 else [
+        tuple(range(n)),tuple(sorted(range(n),key=lambda i:-blocks[i]['size_um'][1])),
+        tuple(sorted(range(n),key=lambda i:-blocks[i]['size_um'][0])),
+        tuple(sorted(range(n),key=lambda i:-blocks[i]['size_um'][0]*blocks[i]['size_um'][1]))]
+    max_span=sum(max(b['size_um']) for b in blocks)+(n-1)*gap
+    thresholds=set()
+    for o in orderings:
+        for axis in (0,1):
+            accum=0.0
+            for index in o:
+                accum+=(blocks[index]['size_um'][axis]+(gap if accum else 0))
+                thresholds.add(round(accum,4))
+    # Limit candidate enumeration for unusually large RTL assemblies.
+    threshold_list=sorted(thresholds)
+    if len(threshold_list)>80:
+        threshold_list=threshold_list[::max(1,len(threshold_list)//80)]
+    best=None
+    for order in orderings:
+        for vertical in (False,True):
+            for limit in threshold_list:
+                major=minor=shelf_height=0.0; output={}
+                for index in order:
+                    b=blocks[index]
+                    width,height=b['size_um']
+                    item_major=height if vertical else width
+                    item_minor=width if vertical else height
+                    if major and major+gap+item_major>limit+1e-6:
+                        minor+=shelf_height+gap;major=shelf_height=0.0
+                    major_offset=major+(gap if major else 0.0)
+                    x=minor if vertical else major_offset
+                    y=major_offset if vertical else minor
+                    output[index]=_dimensioned_rect(b,x+margin,y+margin)
+                    major=major_offset+item_major
+                    shelf_height=max(shelf_height,item_minor)
+                rows=[output[i] for i in range(n)]
+                # Some shelf layouts can place diagonal blocks too close.
+                try:
+                    _validate_2d_clearance(rows,spacing)
+                    check_macro_placement_zones(rows,region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
+                except MacroConstraintError:continue
+                dw,dh=die(rows)
+                corew=dw-2*margin;coreh=dh-2*margin
+                area=corew*coreh
+                # A modest perimeter cost encourages a dense, reasonably
+                # compact cluster without expanding area only for aesthetics.
+                score=area+0.075*(corew+coreh)**2
+                rank=(round(score,4),round(area,4),round(abs(corew-coreh),4),order,vertical,limit)
+                if best is None or rank<best[0]:best=(rank,rows,[dw,dh])
+    if best is None and region_um is not None:
+        # Place candidates next to region origin, stay-out boundaries and
+        # already placed rectangles. Backtrack for small multi-macro projects.
+        x0,y0,x1,y1=region_um
+        placed=[]
+        by_area=sorted(blocks,key=lambda b:-(b['size_um'][0]*b['size_um'][1]))
+        nodes=[0]
+        def attempt(i):
+            if i==len(by_area):
+                try:_validate_2d_clearance(placed,spacing)
+                except MacroConstraintError:return False
+                return True
+            if nodes[0]>120000:return False
+            b=by_area[i]
+            w,h=b['size_um']
+            xs={x0,x1-w};ys={y0,y1-h}
+            for q in placed:
+                xs.update((q['x_um']+q['width_um']+gap,q['x_um']-w-gap))
+                ys.update((q['y_um']+q['height_um']+gap,q['y_um']-h-gap))
+            for sx,sy,ex,ey in stayouts_um:
+                xs.update((ex+halo_um,sx-w-halo_um))
+                ys.update((ey+halo_um,sy-h-halo_um))
+            choices=sorted((round(x,3),round(y,3)) for x in xs for y in ys if x>=x0-1e-6 and y>=y0-1e-6 and x+w<=x1+1e-6 and y+h<=y1+1e-6)
+            for x,y in choices:
+                nodes[0]+=1
+                row=_dimensioned_rect(b,x,y)
+                try:
+                    check_macro_placement_zones([row],region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
+                    for other in placed:
+                        if _rect_gap(row,other)<spacing['min_um']-0.001:
+                            raise MacroConstraintError('clearance')
+                except MacroConstraintError:continue
+                placed.append(row)
+                if attempt(i+1):return True
+                placed.pop()
+            return False
+        if len(by_area)<=10 and attempt(0):
+            ordered={r['instance']:r for r in placed}
+            rows=[ordered[b['instance']] for b in blocks]
+            dw,dh=die(rows)
+            best=((dw*dh,),(rows),[dw,dh])
+    if best is None:
+        raise MacroConstraintError('CO.MACROS_NO_PLACEMENT: cannot pack required macros within CO placement region, stay-outs and spacing')
+    return best[1],best[2]
+
+
+def render_co_macro_plan_svg(rows, die, path):
+    """Visualize measured LEF macro bounds (placement PLAN, never GDS evidence)."""
+    dw,dh=die
+    scale=min(900/max(dw,1),650/max(dh,1))
+    margin=18
+    width=dw*scale+margin*2
+    height=dh*scale+margin*2+38
+    fills=('#335d8e','#38785e','#8e6735','#74458d','#8b4451')
+    parts=[f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.2f}" height="{height:.2f}" viewBox="0 0 {width:.2f} {height:.2f}">',
+           f'<rect x="0" y="0" width="{width:.2f}" height="{height:.2f}" fill="#f4f7fa"/>',
+           '<text x="15" y="24" font-family="Arial" font-size="15" fill="#283748">CO HARD MACRO PLACEMENT PLAN — not GDS signoff</text>',
+           f'<rect x="{margin}" y="{margin+38}" width="{dw*scale:.2f}" height="{dh*scale:.2f}" fill="#e7eef4" stroke="#61758a" stroke-width="2"/>']
+    for i,b in enumerate(rows):
+        x=margin+b['x_um']*scale
+        y=margin+38+(dh-b['y_um']-b['height_um'])*scale
+        w,h=b['width_um']*scale,b['height_um']*scale
+        name=escape(b['name']); inst=escape(b['instance'])
+        parts.extend([f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="{fills[i%len(fills)]}" stroke="#18334a" stroke-width="2"/>',
+                      f'<text x="{x+5:.2f}" y="{y+19:.2f}" font-family="Arial" font-size="14" font-weight="bold" fill="white">{name}</text>',
+                      f'<text x="{x+5:.2f}" y="{y+36:.2f}" font-family="Arial" font-size="12" fill="white">{inst}</text>'])
+    parts.append('</svg>')
+    Path(path).write_text('\n'.join(parts)+'\n',encoding='utf-8')
 
 
 def verify_routed_macro_def(path, plan, tol_um=3):
@@ -181,10 +426,9 @@ def verify_routed_macro_def(path, plan, tol_um=3):
             raise MacroConstraintError('CO.MACROS_DEF: expected real macro '+b['instance']+' '+b['module'])
         if abs(got['x_um']-b['x_um'])>tol_um or abs(got['y_um']-b['y_um'])>tol_um:
             raise MacroConstraintError('CO.MACROS_DEF: macro moved outside required placement: '+b['instance'])
-    for prev,nxt in zip(plan,plan[1:]):
-        gap=items[nxt['instance']]['x_um'] - (items[prev['instance']]['x_um']+prev['width_um'])
-        if not plan_spacing_allowed(gap, plan):
-            raise MacroConstraintError(f'CO.MACROS_SPACING: measured gap {gap:.3f} um is outside CO spacing range')
+    rects=[{**b, 'x_um':items[b['instance']]['x_um'],'y_um':items[b['instance']]['y_um']} for b in plan]
+    _validate_2d_clearance(rects,{'min_um':plan[0]['min_spacing_um'],
+                                  'max_um':plan[0]['max_spacing_um']})
     return {'status':'MACRO_DEF_PLACEMENTS_VERIFIED','instances':items}
 
 
@@ -252,7 +496,7 @@ def run_native_macro_flow(session, preflight):
     from .physical_flow import make_physical_handoff,verify_handoff_inputs
     from .maskinspect import inspect_gds
     co=read_macro_constraints(session.project.co['physical_macros'],session.root,
-                              session.project.config['physical'])
+                              session.project.config['physical'],session.project.co.get('floorplan'))
     physical=session.project.config['physical']
     backend=(session.project.config.get('tools') or {}).get('execution','native')
     dist=(session.project.config.get('tools') or {}).get('wsl_distribution')
@@ -354,9 +598,13 @@ def run_native_macro_flow(session, preflight):
         view=all_views[b['module']]['lef']
         power_pin_evidence[b['module']]=inspect_macro_lef_power(view,b['module'])
         dims.append({**b,'size_um':read_lef_size(view,b['module'])})
-    plan,die=allocate_macro_rectangles(dims,co['spacing'])
+    plan,die=allocate_macro_rectangles(dims,co['spacing'],mode=co['placement_mode'],
+        region_um=co['placement_region_um'],stayouts_um=co['placement_stayouts_um'],halo_um=co['halo_um'])
     for r in plan:
         r['min_spacing_um']=co['spacing']['min_um'];r['max_spacing_um']=co['spacing']['max_um']
+    plan_preview=root/'co_macro_floorplan.svg'
+    render_co_macro_plan_svg(plan,die,plan_preview)
+    session.result.files['co_macro_floorplan']=str(plan_preview)
     views_dir=root/'views';views_dir.mkdir(exist_ok=True)
     macros={}
     for b,r in zip(co['blocks'],plan):
@@ -387,7 +635,7 @@ def run_native_macro_flow(session, preflight):
     # die/core settings must not silently conflict with real macro dimensions.
     _write_json(session.out/'config.json',topcfg)
     _write_json(root/'co_macro_plan.json',{'status':'REQUESTED_NOT_YET_VERIFIED','blocks':plan,
-                                         'top':co['top'],'spacing':co['spacing'],
+                                         'top':co['top'],'spacing':co['spacing'],'placement_mode':co['placement_mode'],
                                          'pdn':{'top_hpitch_um':pdn_hpitch,'top_vpitch_um':pdn_vpitch,
                                                 'child_multilayer':False,'child_power_pins':power_pin_evidence,
                                                 'verification':'Electrical connectivity still must pass LibreLane'},

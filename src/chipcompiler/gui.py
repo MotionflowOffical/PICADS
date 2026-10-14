@@ -13,14 +13,14 @@ from .ir import DLS
 from .waveform import export_vcd
 from .maskinspect import inspect_gds
 from .maskrender import render_gds_svg
-from .klayout_layers import acquire_lyp, klayout_open_argv
+from .klayout_layers import acquire_lyp, klayout_open_argv, exact_gds_palette
 from .dependencies import TOOLS, tool_status, register_tool, unregister_tool, settings_file, resolve_tool, dependency_environment, auto_detect_all
 from .pdk import pdk_status, register_pdk, clear_pdk
 from .windows_installer import install_selected, install_catalog, dependency_root
 from .dependency_storage import storage_inventory, apply_storage_cleanup, readable_bytes
 
 try:
-    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl
+    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl,QPointF
     from PySide6.QtGui import QAction,QColor,QFont,QSyntaxHighlighter,QTextCharFormat,QBrush,QPen,QPainter,QDesktopServices
     from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QSplitter,QVBoxLayout,QHBoxLayout,
         QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainTextEdit,QDockWidget,QLabel,QPushButton,QLineEdit,
@@ -157,6 +157,212 @@ class GraphView(QGraphicsView):
             message=self.graph.addText('No intermediate gates: direct connections or registers only.')
             message.setDefaultTextColor(QColor('#cbdfe7'));message.setPos(10,75)
         self.scene().setSceneRect(self.scene().itemsBoundingRect().adjusted(-30,-20,60,30))
+
+
+class DraggableMacro(QGraphicsRectItem):
+    """Single real rectangular macro, not an editable depiction of standard cells."""
+    def __init__(self, editor, block, scale):
+        super().__init__(0, 0, block['size_um'][0]*scale, block['size_um'][1]*scale)
+        self.editor=editor;self.block=block;self.scale_factor=scale
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsMovable,True)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemSendsGeometryChanges,True)
+        self.setFlag(QGraphicsRectItem.GraphicsItemFlag.ItemIsSelectable,True)
+        self.setZValue(3)
+        self.setPen(QPen(QColor('#62c3df'),2))
+        self.setBrush(QBrush(QColor('#225c75')))
+        caption=QGraphicsTextItem(block['name']+'\n'+block['instance'],self)
+        caption.setDefaultTextColor(QColor('#f2f9fb'))
+        caption.setScale(.85)
+        caption.setPos(4,4)
+        caption.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.last_valid=None
+
+    def itemChange(self, change, value):
+        if (change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange and
+                getattr(self, 'last_valid', None) is not None):
+            return self.editor.clamp_drag(self, value)
+        return super().itemChange(change,value)
+
+    def mouseReleaseEvent(self,event):
+        super().mouseReleaseEvent(event)
+        self.editor.validate_movement(self)
+
+
+class MacroFloorplanEditor(QDialog):
+    """Drag physical RTL blocks, validate CO distances, save coordinates as constraints.
+
+    Dragging does not alter GDS; the normal Build button must reroute the chip.
+    """
+    def __init__(self,root,parent=None):
+        super().__init__(parent)
+        from .co_macros import read_macro_constraints,allocate_macro_rectangles
+        import yaml
+        self.root=Path(root).resolve()
+        self.setWindowTitle('CO Physical Macro Placement — drag blocks / save architecture.co')
+        self.resize(1040,780)
+        co_doc=yaml.safe_load((self.root/'architecture.co').read_text(encoding='utf-8'))
+        co=co_doc['physical_macros']
+        physical=yaml.safe_load((self.root/'chip.yaml').read_text(encoding='utf-8'))['physical']
+        self.spec=read_macro_constraints(co,self.root,physical,co_doc.get('floorplan'))
+        self.blocks=[]
+        saved_plan=self.root/'build'/'latest'/'co_macros'/'co_macro_plan.json'
+        by_instance={}
+        if saved_plan.is_file():
+            try:
+                saved=json.loads(saved_plan.read_text(encoding='utf-8'))
+                if saved.get('top')==self.spec['top']:
+                    by_instance={r['instance']:r for r in saved['blocks']}
+            except (OSError,ValueError,KeyError,TypeError):pass
+        for b in self.spec['blocks']:
+            match=by_instance.get(b['instance'])
+            size=([match['width_um'],match['height_um']] if match and
+                  match.get('module')==b['module'] else [b['width'],b['height']])
+            self.blocks.append({**b,'size_um':size})
+        self.sizes={b['instance']:b['size_um'] for b in self.blocks}
+        if self.spec['placement_mode']=='manual':
+            self.locations={b['instance']:list(b['location_um']) for b in self.blocks}
+        else:
+            rows,_=allocate_macro_rectangles(self.blocks,self.spec['spacing'],mode=self.spec['placement_mode'],
+                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+            self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
+        zone=self.spec['placement_region_um']
+        from .co_macro_editor import coordinates_from_blocks
+        from .co_macros import check_macro_placement_zones,_validate_2d_clearance
+        starting=coordinates_from_blocks(self.blocks,self.locations,
+            min_coord=0 if self.spec['placement_region_um'] else 30)
+        check_macro_placement_zones(starting,region_um=self.spec['placement_region_um'],
+            stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+        _validate_2d_clearance(starting,self.spec['spacing'])
+        self.canvas_w=max(450,max(self.locations[b['instance']][0]+b['size_um'][0] for b in self.blocks)+160,
+                          (zone[2]+30 if zone else 0))
+        self.canvas_h=max(380,max(self.locations[b['instance']][1]+b['size_um'][1] for b in self.blocks)+160,
+                          (zone[3]+30 if zone else 0))
+        self.allowed_zone=zone or [30,30,self.canvas_w-30,self.canvas_h-30]
+        self.scale_factor=min(2.0,850/self.canvas_w,580/self.canvas_h)
+        self.scene=QGraphicsScene(self);self.view=QGraphicsView(self.scene)
+        self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.view.setBackgroundBrush(QBrush(QColor('#09151f')))
+        self.view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
+        self.items={}
+        body=QVBoxLayout(self)
+        self.summary=QLabel('Drag modules inside the CO placement region (outlined in cyan); red rectangles are mandatory stay-outs. '
+                            'Dragging is constrained live, including clearance from other modules. '
+                            'Origin is lower left; units are micrometres. Nominal sizes are used until hardened LEF exists.')
+        self.summary.setWordWrap(True);body.addWidget(self.summary)
+        body.addWidget(self.view,1)
+        self.status=QLabel('Changes remain in the editor until Save to CO. Physical GDS must be regenerated.')
+        body.addWidget(self.status)
+        row=QHBoxLayout()
+        compact=QPushButton('Repack Compact');compact.clicked.connect(self.repack)
+        save=QPushButton('Save Positions to CO');save.clicked.connect(self.save)
+        cancel=QPushButton('Cancel');cancel.clicked.connect(self.reject)
+        for b in (compact,save,cancel):row.addWidget(b)
+        body.addLayout(row)
+        self._paint()
+
+    def _paint(self):
+        self.scene.clear();self.items={}
+        sc=self.scale_factor;w=self.canvas_w*sc;h=self.canvas_h*sc
+        self.scene.addRect(0,0,w,h,QPen(QColor('#607a8a'),1),QBrush(QColor('#122530')))
+        for x in range(0,int(self.canvas_w)+1,20):
+            self.scene.addLine(x*sc,0,x*sc,h,QPen(QColor('#26404d'),.5))
+        for y in range(0,int(self.canvas_h)+1,20):
+            self.scene.addLine(0,y*sc,w,y*sc,QPen(QColor('#26404d'),.5))
+        x0,y0,x1,y1=self.allowed_zone
+        self.scene.addRect(x0*sc,(self.canvas_h-y1)*sc,(x1-x0)*sc,(y1-y0)*sc,
+                           QPen(QColor('#48cce8'),2),QBrush(QColor('#0e3033'))).setZValue(-2)
+        for i,(sx,sy,ex,ey) in enumerate(self.spec['placement_stayouts_um']):
+            pad=self.spec['halo_um']
+            block=self.scene.addRect((sx-pad)*sc,(self.canvas_h-ey-pad)*sc,(ex-sx+2*pad)*sc,(ey-sy+2*pad)*sc,
+                           QPen(QColor('#ff7c7c'),2),QBrush(QColor('#613135')))
+            block.setZValue(-1)
+            block.setToolTip(f'CO stay-out #{i+1}; includes {pad:g} µm required halo')
+        for b in self.blocks:
+            item=DraggableMacro(self,b,sc)
+            xy=self.locations[b['instance']];item.setPos(xy[0]*sc,(self.canvas_h-xy[1]-b['size_um'][1])*sc)
+            item.last_valid=item.pos()
+            self.scene.addItem(item);self.items[b['instance']]=item
+        self.scene.setSceneRect(-15,-15,w+30,h+30)
+        self.view.fitInView(self.scene.sceneRect(),Qt.AspectRatioMode.KeepAspectRatio)
+
+    def _scene_position_to_um(self,item,pos):
+        sc=self.scale_factor
+        return (round(pos.x()/sc,3),round(self.canvas_h-pos.y()/sc-item.block['size_um'][1],3))
+
+    def _um_to_scene_position(self,item,x,y):
+        sc=self.scale_factor
+        return QPointF(x*sc,(self.canvas_h-y-item.block['size_um'][1])*sc)
+
+    def _valid_drag(self,item,x,y):
+        from .co_macro_editor import coordinates_from_blocks
+        from .co_macros import _validate_2d_clearance,check_macro_placement_zones,MacroConstraintError
+        candidates={k:list(v) for k,v in self.locations.items()}
+        candidates[item.block['instance']]=[x,y]
+        try:
+            rectangles=coordinates_from_blocks(self.blocks,candidates,
+                min_coord=0 if self.spec['placement_region_um'] else 30)
+            check_macro_placement_zones(rectangles,region_um=self.allowed_zone,
+                stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+            _validate_2d_clearance(rectangles,self.spec['spacing'])
+            return True
+        except MacroConstraintError:
+            return False
+
+    def clamp_drag(self,item,requested):
+        """Physically prevent invalid motion, not merely reject at mouse release."""
+        w,h=item.block['size_um'];x0,y0,x1,y1=self.allowed_zone
+        px,py=self._scene_position_to_um(item,requested)
+        x=min(max(px,x0),x1-w);y=min(max(py,y0),y1-h)
+        if self._valid_drag(item,x,y):
+            item.last_valid=self._um_to_scene_position(item,x,y)
+            return item.last_valid
+        # Slide along an obstacle when one axis can move independently.
+        ox,oy=self._scene_position_to_um(item,item.last_valid)
+        for nx,ny in ((x,oy),(ox,y)):
+            if self._valid_drag(item,nx,ny):
+                item.last_valid=self._um_to_scene_position(item,nx,ny)
+                return item.last_valid
+        # If both axes are blocked, stop at the boundary rather than jumping
+        # back to the position at the beginning of the drag operation.
+        lo,hi=0.,1.
+        for _ in range(15):
+            t=(lo+hi)*0.5
+            nx=ox+(x-ox)*t;ny=oy+(y-oy)*t
+            if self._valid_drag(item,nx,ny):lo=t
+            else:hi=t
+        item.last_valid=self._um_to_scene_position(item,ox+(x-ox)*lo,oy+(y-oy)*lo)
+        return item.last_valid
+
+    def validate_movement(self,item):
+        x,y=self._scene_position_to_um(item,item.pos())
+        if not self._valid_drag(item,x,y):
+            item.setPos(item.last_valid)
+            self.status.setText('Blocked by CO placement boundary, stay-out or module clearance.')
+            return
+        self.locations[item.block['instance']]=[x,y]
+        item.last_valid=item.pos()
+        self.status.setText(f'{item.block["instance"]}: ({x:g}, {y:g}) µm — inside CO allowed zone; not saved')
+
+    def repack(self):
+        from .co_macros import allocate_macro_rectangles,MacroConstraintError
+        try:
+            rows,_=allocate_macro_rectangles(self.blocks,self.spec['spacing'],mode='compact',
+                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+            self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
+            self._paint()
+            self.status.setText('Repacked compactly. Save to CO to commit, or Cancel to discard.')
+        except MacroConstraintError as exc:
+            self.status.setText('Automatic packing failed: '+str(exc))
+
+    def save(self):
+        from .co_macro_editor import save_macro_locations
+        try:
+            result=save_macro_locations(self.root,self.locations,measured_sizes=self.sizes)
+        except Exception as exc:
+            QMessageBox.warning(self,'Cannot save physical constraints',str(exc))
+            return
+        self.status.setText(result['status'])
+        self.accept()
 
 class BuildWorker(QThread):
     finished_report=Signal(object)
@@ -895,18 +1101,69 @@ class Window(QMainWindow):
                   ('1. Generate Physical Layout (GDS)',lambda:self.build('layout')),
                   ('2. Verify Existing Layout (DRC / LVS)',lambda:self.build('verify_layout')),
                   ('Refresh Artifacts',self.populate_tree),
-                  ('Planned Module Regions',self.show_planned_floorplan)]
+                  ('CO Macro Placement Plan',self.show_co_macro_plan),('Edit CO Floorplan (Drag and Drop)',self.edit_co_floorplan),('Planned Module Regions',self.show_planned_floorplan)]
         for offset in range(0,len(controls),4):
             buttons=QHBoxLayout()
             for text,fn in controls[offset:offset+4]:
                 b=QPushButton(text);b.clicked.connect(fn);buttons.addWidget(b)
             v.addLayout(buttons)
         self.physical_message=QPlainTextEdit();self.physical_message.setReadOnly(True)
-        self.physical_message.setPlainText('Two-stage physical workflow:\n1. Generate Physical Layout: compile, synthesize, place, route and stream GDS. Stop before DRC/LVS.\n2. Verify Existing Layout: resume LibreLane checks from the stored layout (no new synthesis/routing).\n\nCO module region previews are GUIDE ONLY in r6/r7: flattened transactional hardware has no enforced physical module fences.\n\nNamed GDS layers require the selected PDK KLayout .lyp palette. PICADS will try to load it from the installed SKY130 PDK.\n\nNo GDS alone establishes manufacturability.')
+        self.physical_message.setPlainText('Two-stage physical workflow:\n1. Generate Physical Layout: compile, synthesize, place, route and stream GDS. Stop before DRC/LVS.\n2. Verify Existing Layout: resume LibreLane checks from the stored layout (no new synthesis/routing).\n\nCO physical_macros enforce separate hardened RTL macro blocks. The Python DLS reference is not yet proven equivalent to independently supplied RTL.\n\nKLayout uses an exact layer/datatype palette generated from the GDS. Numerical pairs not in the verified SKY130 catalogue remain explicitly labelled.\n\nKeep Docker Desktop running and enable Ubuntu under Settings > Resources > WSL Integration before generating a SKY130 layout. No GDS alone establishes manufacturability.')
         v.addWidget(self.physical_message)
         self.physical_layout=v
         self.mask_svg_widget=None
         return w
+    def edit_co_floorplan(self):
+        """Open visual CO editor; preserve dirty architecture.co buffers."""
+        if self.worker is not None and self.worker.isRunning():
+            QMessageBox.warning(self,'Build is running','Wait for the physical build to finish before editing the floorplan.')
+            return
+        co_path=self.root/'architecture.co'
+        for i in range(self.editors.count()):
+            e=self.editors.widget(i)
+            if isinstance(e,CodeEditor) and e.path==co_path and e.document().isModified():
+                QMessageBox.warning(self,'Unsaved CO edits','Save architecture.co in the code editor before opening the drag-and-drop floorplan.')
+                return
+        try:
+            dialog=MacroFloorplanEditor(self.root,self)
+        except Exception as exc:
+            QMessageBox.warning(self,'CO floorplan cannot open',str(exc));return
+        if dialog.exec()!=QDialog.DialogCode.Accepted:return
+        for i in range(self.editors.count()):
+            e=self.editors.widget(i)
+            if isinstance(e,CodeEditor) and e.path==co_path:
+                e.setPlainText(co_path.read_text(encoding='utf-8'))
+                e.document().setModified(False)
+        self.physical_message.setPlainText('Saved required physical module positions in architecture.co.\n'
+             'Mode: manual. Re-run Generate Physical Layout to produce a new GDS at these coordinates.\n'
+             'This is a placement constraint, not physical signoff evidence.')
+        self.tabs.setCurrentIndex(3)
+        self.statusBar().showMessage('CO module positions saved. Regenerate GDS to apply.')
+
+    def show_co_macro_plan(self):
+        """Show LEF-derived required macro positions, NOT a claimed final GDS."""
+        path=self.root/'build'/'latest'/'co_macros'/'co_macro_floorplan.svg'
+        info=self.root/'build'/'latest'/'co_macros'/'co_macro_plan.json'
+        if not path.is_file() or not info.is_file():
+            QMessageBox.information(self,'No physical macro plan',
+                'Generate Physical Layout first with physical_macros enabled in architecture.co. '
+                'PICADS will then use measured LEF dimensions to calculate the required macro coordinates.')
+            return
+        try:
+            data=json.loads(info.read_text(encoding='utf-8'))
+            self.physical_message.setPlainText(json.dumps({
+                'status':data.get('status'),'placement_mode':data.get('placement_mode'),
+                'blocks':data.get('blocks'),'spacing':data.get('spacing'),
+                'notice':'This is a requested placement plan; final DEF/GDS must be checked separately.'},indent=2))
+            if self.mask_svg_widget is None:
+                from PySide6.QtSvgWidgets import QSvgWidget
+                self.mask_svg_widget=QSvgWidget()
+                self.physical_layout.addWidget(self.mask_svg_widget,4)
+            self.mask_svg_widget.load(str(path))
+            self.tabs.setCurrentIndex(3)
+        except (OSError,ValueError) as exc:
+            QMessageBox.warning(self,'Macro plan could not open',str(exc))
+
     def show_planned_floorplan(self):
         """Show source-level CO floorplan; never label it actual GDS placement."""
         path=self.root/'build'/'latest'/'module_floorplan.svg'
@@ -1075,7 +1332,7 @@ class Window(QMainWindow):
         for name,mode in [('Compile + Verify DLS','compile'),('Synthesize','build'),('1. Generate GDS','layout'),('2. Verify GDS','verify_layout')]:
             button=QPushButton(name);button.clicked.connect(lambda checked=False,m=mode:self.build(m));row.addWidget(button)
         v.addLayout(row)
-        v.addWidget(QLabel('Layout generation stops after GDS stream-out. Verification resumes from the existing run without re-placing cells. CO region previews are not enforced placement.'))
+        v.addWidget(QLabel('Layout generation stops after GDS stream-out. Verification resumes from the existing run without re-placing cells. CO macro instances can be required physical blocks; ordinary CO region previews remain guides.'))
         split=QSplitter(Qt.Orientation.Horizontal)
         self.stage_list=QTreeWidget();self.stage_list.setHeaderLabels(['Stage','Status','Blocked by issue ID']);split.addWidget(self.stage_list)
         self.artifacts=QTreeWidget();self.artifacts.setHeaderLabels(['Artifact','Path']);self.artifacts.itemDoubleClicked.connect(self.open_artifact);split.addWidget(self.artifacts)
@@ -1093,10 +1350,21 @@ class Window(QMainWindow):
             palette=acquire_lyp(self.root,pdk=physical.get('pdk','sky130A'),
                                 pdk_root=physical.get('pdk_root'),
                                 distribution=tool.get('wsl_distribution','Ubuntu'))
-            subprocess.Popen(klayout_open_argv(viewer,gds,palette=palette),
-                             env=dependency_environment(tool='klayout'))
-            if not palette:
-                self.statusBar().showMessage('KLayout opened, but no PDK .lyp layer palette was found. Select SKY130 technology in KLayout.')
+            # Construct an exact layer-purpose palette from this GDS itself.
+            # Reusing the raw PDK palette displayed empty named rows while
+            # real drawing layers appeared as anonymous 68/20 etc.
+            effective_palette,coverage=exact_gds_palette(self.root,gds,palette=palette,
+                                                         pdk=physical.get('pdk','sky130A'))
+            command=klayout_open_argv(viewer,gds,palette=effective_palette or palette)
+            if effective_palette:
+                # Every observed pair has an exact entry; -lx would re-add
+                # duplicates when the palette has no matching geometry.
+                command=[arg for arg in command if arg!='-lx']
+            subprocess.Popen(command,env=dependency_environment(tool='klayout'))
+            if effective_palette:
+                self.statusBar().showMessage('KLayout: exact GDS layer/datatype palette loaded. Label/pin layers hidden by default; all remain selectable.')
+            elif not palette:
+                self.statusBar().showMessage('KLayout opened, but no matching layer palette could be generated.')
         except (OSError,ValueError) as exc:
             QMessageBox.warning(self,'KLayout launch failed',str(exc))
 

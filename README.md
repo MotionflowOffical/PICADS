@@ -1,3 +1,19 @@
+## r9d — CO floorplan drag-and-drop with enforced stay-outs
+
+Use **Physical / Masks → Edit CO Floorplan (Drag and Drop)** to move real RTL macros. CO `physical_macros.placement.region_um` sets the allowed cyan placement area; `stayouts_um` defines prohibited red areas. Blocks cannot cross those boundaries while dragging and still respect macro spacing/halos. Existing `floorplan.keepouts` marked `hard` and `required` are enforced as well. Invalid positions cannot be saved, and automatic packing uses the same exclusions. See [CO zone and drag constraints](docs/CO_DRAG_DROP_STAYOUTS_r9d.md). This does **not** prevent signal/power routing over a blocked zone.
+
+The new `examples/helios16_2003` project demonstrates a larger 2003-era-inspired 16-bit embedded CPU with six RTL macros (program store, data scratchpad, control, registers, ALU, UART/timer/GPIO peripherals). **Not taped out or validated as production silicon**. The Python source is a subset ALU reference, not a fully equivalent CPU implementation.
+
+## r9c — compact CO macro placement, Docker prerequisite, exact KLayout layer controls
+
+**Before physical generation on Windows:** Start **Docker Desktop** and wait for the engine to show running. Under **Settings → Resources → WSL Integration**, enable the Ubuntu distribution PICADS uses. Keep Docker Desktop open/running while PICADS uses LibreLane. If Docker is closed, `wsl -d Ubuntu --exec docker info` fails and PICADS reports `PHYSICAL.MACRO_PREFLIGHT`; this is a dependency issue, not a Tiny8 RTL fault. Docker Desktop can remain minimized to the tray provided its engine stays running.
+
+**Native CO placement:** `physical_macros.placement.mode: compact` (the default in r9c) uses deterministic 2-D LEF-sized shelf packing, selecting a space-efficient arrangement while enforcing the configured minimum clearance. Use `mode: row` to recover the old horizontal line, or `mode: manual` and provide `[x,y]` in `location_um` on *every* block; invalid overlaps and missing bindings fail. The GUI **CO Macro Placement Plan** displays the measured LEF floorplan after generation. This is a preview of required coordinates; final DEF/GDS verification remains mandatory. Compact placement is a heuristic, not globally optimal net-aware placement.
+
+**KLayout layer toggles:** PICADS now constructs a `.lyp` palette containing **exactly** the GDS layer/datatype pairs detected in the selected layout, with verified SKY130-purpose names when known, and numeric fallback names otherwise. Unlike the older PDK `.lyp` fallback, there are no duplicate unbound named rows. The generated palette and full mapping are in `build/latest/klayout_layers_picads_exact.lyp` and `build/latest/klayout_layer_mapping.json`. Pin and text label layers are hidden by default; select a layer to toggle its actual geometry. Existing GDS files remain unchanged.
+
+**Top-level geometry outside macro boundaries:** power/ground straps and vias, inter-macro signal and clock routing, pad/pin labeling and any physical-design support cells belong to the parent assembly and are normal. A child macro's boundary restricts its cells, not all top-level routing. To identify a particular shape, inspect the routed DEF or turn on one exact GDS layer at a time. The generated GDS is not foundry-signoff qualified.
+
 ## PICADS r9: native CO hard macro physical placement
 
 The normal Physical Layout action now reads `physical_macros` in `architecture.co`, builds real separate RTL macros and checks their routed placement. See [Native CO hard macro documentation](docs/CO_NATIVE_HARD_MACROS_r9.md). A bare project is supplied at `examples/tiny8_co_native`. Its physical RTL is independent of the transactional Python DLS reference; equivalence remains unverified. The first live Windows/WSL GDS build is not yet tested.
