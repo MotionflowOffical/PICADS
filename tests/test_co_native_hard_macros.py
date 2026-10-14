@@ -160,6 +160,11 @@ def test_native_macro_full_layout_mock_requires_actual_def_gds(tmp_path,monkeypa
     assert result.stages['physical']['macro_placement']=='MACRO_GDS_AND_DEF_PLACEMENT_VERIFIED'
     assert set(calls)>={'macro_tiny8_memory','macro_tiny8_control','macro_tiny8_alu','physical'}
     parent=json.loads((folder/'build/latest/config.json').read_text())
+    macro_plan=json.loads((folder/'build/latest/co_macros/co_macro_plan.json').read_text())
+    assert macro_plan['auto_die']['die_area_um']==parent['DIE_AREA']
+    assert macro_plan['auto_die']['sizing_basis']=='placed_macro_bounds_plus_margin'
+    assert macro_plan['auto_die']['macro_coverage_percent']>0
+    assert 'placement_region_um' in macro_plan
     assert parent['PDN_MULTILAYER'] is True
     assert 25 <= parent['PDN_HPITCH'] <= 80
     assert 25 <= parent['PDN_VPITCH'] <= 80
@@ -263,6 +268,8 @@ def test_macro_xor_failure_remains_blocking_at_verification(tmp_path, monkeypatc
         {'macro_children':[receipt]}, {'pdk':'sky130A'}, {'runner':'wsl'})
     assert session.stages['macro_signoff']['status']=='FAIL'
     assert any(i.code=='VERIFY.MACRO_SIGNOFF_FAILED' for i in session.issues.issues)
+    assert session.stages['macro_signoff']['diagnostics']['status']=='MAGIC_KLAYOUT_XOR_MISMATCH'
+    assert session.stages['macro_signoff']['diagnostics']['xor_difference_count']==1
 
 
 def test_native_macro_lef_requires_exposed_power_geometry(tmp_path):

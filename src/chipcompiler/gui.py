@@ -20,13 +20,13 @@ from .windows_installer import install_selected, install_catalog, dependency_roo
 from .dependency_storage import storage_inventory, apply_storage_cleanup, readable_bytes
 
 try:
-    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl,QPointF
+    from PySide6.QtCore import Qt,QTimer,QThread,Signal,QRegularExpression,QUrl,QPointF,QRectF
     from PySide6.QtGui import QAction,QColor,QFont,QSyntaxHighlighter,QTextCharFormat,QBrush,QPen,QPainter,QDesktopServices
     from PySide6.QtWidgets import (QApplication,QMainWindow,QWidget,QSplitter,QVBoxLayout,QHBoxLayout,
         QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainTextEdit,QDockWidget,QLabel,QPushButton,QLineEdit,
-        QGraphicsScene,QGraphicsView,QGraphicsRectItem,QGraphicsTextItem,QGraphicsLineItem,
+        QGraphicsScene,QGraphicsView,QGraphicsRectItem,QGraphicsTextItem,QGraphicsLineItem,QGraphicsItem,
         QMessageBox,QFileDialog,QComboBox,QToolBar,QInputDialog,QTableWidget,QTableWidgetItem,QHeaderView,
-        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar,QScrollArea)
+        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar,QScrollArea,QSizePolicy)
 except ImportError as exc:
     raise ImportError('The GUI requires PySide6. Install with: pip install "chipcompiler[gui]"') from exc
 
@@ -159,6 +159,61 @@ class GraphView(QGraphicsView):
         self.scene().setSceneRect(self.scene().itemsBoundingRect().adjusted(-30,-20,60,30))
 
 
+class AspectPreservingSvgWidget(QWidget):
+    """Keep SVG design-space aspect ratio when its containing tab resizes.
+
+    Unlike a freely stretching QSvgWidget, this explicitly letterboxes in a
+    centered viewport, so floorplan rectangles/text retain their proportions.
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        from PySide6.QtSvg import QSvgRenderer
+        self._renderer=QSvgRenderer(self)
+        self._renderer.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding,QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(180)
+
+    def load(self, source):
+        ok=self._renderer.load(str(source))
+        if not ok or not self._renderer.isValid():
+            raise ValueError(f'Invalid SVG preview: {source}')
+        self.update()
+
+    def paintEvent(self,event):
+        super().paintEvent(event)
+        if not self._renderer.isValid():return
+        intrinsic=self._renderer.viewBoxF()
+        if intrinsic.width()<=0 or intrinsic.height()<=0:
+            intrinsic=QRectF(0,0,self._renderer.defaultSize().width(),self._renderer.defaultSize().height())
+        if intrinsic.width()<=0 or intrinsic.height()<=0:return
+        available=self.rect().adjusted(6,6,-6,-6)
+        from .preview_geometry import aspect_fit_rectangle
+        dx,dy,w,h=aspect_fit_rectangle(intrinsic.width(),intrinsic.height(),
+            available.width(),available.height())
+        rect=QRectF(available.x()+dx,available.y()+dy,w,h)
+        painter=QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self._renderer.render(painter,rect)
+
+
+class AspectFitGraphicsView(QGraphicsView):
+    """Resize/zoom in uniform dimensions, retaining the selected fit target."""
+    def __init__(self, scene, parent=None):
+        super().__init__(scene,parent)
+        self.fit_target=None
+
+    def fit_rect(self, rect):
+        self.fit_target=QRectF(rect)
+        if self.fit_target.isValid() and self.viewport().width()>0 and self.viewport().height()>0:
+            self.resetTransform()
+            self.fitInView(self.fit_target,Qt.AspectRatioMode.KeepAspectRatio)
+
+    def resizeEvent(self,event):
+        super().resizeEvent(event)
+        if self.fit_target is not None:
+            self.fitInView(self.fit_target,Qt.AspectRatioMode.KeepAspectRatio)
+
+
 class DraggableMacro(QGraphicsRectItem):
     """Single real rectangular macro, not an editable depiction of standard cells."""
     def __init__(self, editor, block, scale):
@@ -170,11 +225,16 @@ class DraggableMacro(QGraphicsRectItem):
         self.setZValue(3)
         self.setPen(QPen(QColor('#62c3df'),2))
         self.setBrush(QBrush(QColor('#225c75')))
+        # Never scale text down with the full CO region or large macro dimensions.
+        # A child graphics item tracks the block while its text stays readable.
         caption=QGraphicsTextItem(block['name']+'\n'+block['instance'],self)
-        caption.setDefaultTextColor(QColor('#f2f9fb'))
-        caption.setScale(.85)
-        caption.setPos(4,4)
+        caption.setDefaultTextColor(QColor('#ffffff'))
+        caption.setFont(QFont('Segoe UI',10,QFont.Weight.DemiBold))
+        caption.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,True)
+        caption.setZValue(10)
+        caption.setPos(5,5)
         caption.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.setToolTip(f"{block['name']}  |  {block['instance']}  |  {block['size_um'][0]:g} × {block['size_um'][1]:g} µm")
         self.last_valid=None
 
     def itemChange(self, change, value):
@@ -213,16 +273,25 @@ class MacroFloorplanEditor(QDialog):
                 if saved.get('top')==self.spec['top']:
                     by_instance={r['instance']:r for r in saved['blocks']}
             except (OSError,ValueError,KeyError,TypeError):pass
+        from .co_macros import cached_macro_lef_size
+        self.unmeasured_auto_blocks=[]
         for b in self.spec['blocks']:
             match=by_instance.get(b['instance'])
-            size=([match['width_um'],match['height_um']] if match and
-                  match.get('module')==b['module'] else [b['width'],b['height']])
+            # Verified cache is authoritative for auto-sized child geometry.
+            # A plan from a previous *fixed-size* run is not admissible.
+            size=cached_macro_lef_size(self.root,b,physical)
+            if size is None:
+                saved_compatible=(match and match.get('module')==b['module'] and b['die_mode']=='fixed')
+                size=([match['width_um'],match['height_um']] if saved_compatible else
+                      [b['width'],b['height']])
+                if b['die_mode']=='auto' and not saved_compatible:
+                    self.unmeasured_auto_blocks.append(b['name'])
             self.blocks.append({**b,'size_um':size})
         self.sizes={b['instance']:b['size_um'] for b in self.blocks}
         if self.spec['placement_mode']=='manual':
             self.locations={b['instance']:list(b['location_um']) for b in self.blocks}
         else:
-            rows,_=allocate_macro_rectangles(self.blocks,self.spec['spacing'],mode=self.spec['placement_mode'],
+            rows,_=allocate_macro_rectangles(self.blocks,self.spec['packing_spacing'],mode=self.spec['placement_mode'],
                 region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
             self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
         zone=self.spec['placement_region_um']
@@ -233,20 +302,22 @@ class MacroFloorplanEditor(QDialog):
         check_macro_placement_zones(starting,region_um=self.spec['placement_region_um'],
             stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
         _validate_2d_clearance(starting,self.spec['spacing'])
-        self.canvas_w=max(450,max(self.locations[b['instance']][0]+b['size_um'][0] for b in self.blocks)+160,
+        # The hard CO region is a legal placement limit, NOT the chip boundary.
+        # Keep it scrollable while initially zooming onto the calculated die.
+        self.canvas_w=max(450,max(self.locations[b['instance']][0]+b['size_um'][0] for b in self.blocks)+60,
                           (zone[2]+30 if zone else 0))
-        self.canvas_h=max(380,max(self.locations[b['instance']][1]+b['size_um'][1] for b in self.blocks)+160,
+        self.canvas_h=max(380,max(self.locations[b['instance']][1]+b['size_um'][1] for b in self.blocks)+60,
                           (zone[3]+30 if zone else 0))
         self.allowed_zone=zone or [30,30,self.canvas_w-30,self.canvas_h-30]
-        self.scale_factor=min(2.0,850/self.canvas_w,580/self.canvas_h)
-        self.scene=QGraphicsScene(self);self.view=QGraphicsView(self.scene)
+        self.scale_factor=1.0  # physical µm are graphics-scene units
+        self.scene=QGraphicsScene(self);self.view=AspectFitGraphicsView(self.scene)
         self.view.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.view.setBackgroundBrush(QBrush(QColor('#09151f')))
         self.view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.items={}
         body=QVBoxLayout(self)
-        self.summary=QLabel('Drag modules inside the CO placement region (outlined in cyan); red rectangles are mandatory stay-outs. '
-                            'Dragging is constrained live, including clearance from other modules. '
+        self.summary=QLabel('Chip die is auto-sized around placed blocks; the cyan CO region is only the permitted placement limit. '
+                            'Drag modules to edit the layout; red rectangles are mandatory stay-outs. '
                             'Origin is lower left; units are micrometres. Nominal sizes are used until hardened LEF exists.')
         self.summary.setWordWrap(True);body.addWidget(self.summary)
         body.addWidget(self.view,1)
@@ -254,13 +325,33 @@ class MacroFloorplanEditor(QDialog):
         body.addWidget(self.status)
         row=QHBoxLayout()
         compact=QPushButton('Repack Compact');compact.clicked.connect(self.repack)
+        fit_die=QPushButton('Fit Chip');fit_die.clicked.connect(self.fit_die)
+        fit_region=QPushButton('Fit CO Region');fit_region.clicked.connect(self.fit_region)
         save=QPushButton('Save Positions to CO');save.clicked.connect(self.save)
         cancel=QPushButton('Cancel');cancel.clicked.connect(self.reject)
-        for b in (compact,save,cancel):row.addWidget(b)
+        for b in (compact,fit_die,fit_region,save,cancel):row.addWidget(b)
         body.addLayout(row)
         self._paint()
 
     def _paint(self):
+        from .co_macros import autosized_macro_die
+        from .co_macro_editor import coordinates_from_blocks
+        rows=coordinates_from_blocks(self.blocks,self.locations,
+            min_coord=0 if self.spec['placement_region_um'] else 30)
+        metrics=autosized_macro_die(rows)
+        self.die_metrics=metrics
+        die_w,die_h=metrics['width_um'],metrics['height_um']
+        sizing_status=('PREVIEW ESTIMATE — auto macros need hardening to measure LEF: '+
+                       ', '.join(self.unmeasured_auto_blocks)+'. ' if self.unmeasured_auto_blocks
+                       else 'Macro geometry from hardened LEF or fixed CO dimensions. ')
+        self.summary.setText(
+            f"{'Estimated' if self.unmeasured_auto_blocks else 'Auto-sized'} die: "
+            f"{die_w:g} × {die_h:g} µm | "
+            f"macro footprint: {metrics['macro_coverage_percent']:.1f}% | "
+            +sizing_status+
+            'This percentage counts macro rectangles, NOT actual cell utilization. '
+            'Cyan = CO allowed region (not die size); red = prohibited stay-outs. '
+            'Placement is unverified until routed.')
         self.scene.clear();self.items={}
         sc=self.scale_factor;w=self.canvas_w*sc;h=self.canvas_h*sc
         self.scene.addRect(0,0,w,h,QPen(QColor('#607a8a'),1),QBrush(QColor('#122530')))
@@ -268,9 +359,16 @@ class MacroFloorplanEditor(QDialog):
             self.scene.addLine(x*sc,0,x*sc,h,QPen(QColor('#26404d'),.5))
         for y in range(0,int(self.canvas_h)+1,20):
             self.scene.addLine(0,y*sc,w,y*sc,QPen(QColor('#26404d'),.5))
+        # Legal region may be far larger than the actual chip: show the
+        # constraint with a dashed outline, while outlining the computed die.
         x0,y0,x1,y1=self.allowed_zone
+        region_pen=QPen(QColor('#48cce8'),1.5)
+        region_pen.setStyle(Qt.PenStyle.DashLine)
         self.scene.addRect(x0*sc,(self.canvas_h-y1)*sc,(x1-x0)*sc,(y1-y0)*sc,
-                           QPen(QColor('#48cce8'),2),QBrush(QColor('#0e3033'))).setZValue(-2)
+                           region_pen,QBrush(QColor('#0e3033'))).setZValue(-2)
+        die_rect=QRectF(0,(self.canvas_h-die_h)*sc,die_w*sc,die_h*sc)
+        self.scene.addRect(die_rect,QPen(QColor('#e6d38b'),2),
+                           QBrush(QColor('#1d3440'))).setZValue(-1.5)
         for i,(sx,sy,ex,ey) in enumerate(self.spec['placement_stayouts_um']):
             pad=self.spec['halo_um']
             block=self.scene.addRect((sx-pad)*sc,(self.canvas_h-ey-pad)*sc,(ex-sx+2*pad)*sc,(ey-sy+2*pad)*sc,
@@ -283,7 +381,17 @@ class MacroFloorplanEditor(QDialog):
             item.last_valid=item.pos()
             self.scene.addItem(item);self.items[b['instance']]=item
         self.scene.setSceneRect(-15,-15,w+30,h+30)
-        self.view.fitInView(self.scene.sceneRect(),Qt.AspectRatioMode.KeepAspectRatio)
+        self._die_view_rect=die_rect.adjusted(-15,-15,15,15)
+        self.view.fit_rect(self._die_view_rect)
+
+    def fit_die(self):
+        self.view.fit_rect(self._die_view_rect)
+
+    def fit_region(self):
+        x0,y0,x1,y1=self.allowed_zone
+        self.view.fit_rect(QRectF(x0*self.scale_factor-15,
+            (self.canvas_h-y1)*self.scale_factor-15,
+            (x1-x0)*self.scale_factor+30,(y1-y0)*self.scale_factor+30))
 
     def _scene_position_to_um(self,item,pos):
         sc=self.scale_factor
@@ -342,11 +450,13 @@ class MacroFloorplanEditor(QDialog):
         self.locations[item.block['instance']]=[x,y]
         item.last_valid=item.pos()
         self.status.setText(f'{item.block["instance"]}: ({x:g}, {y:g}) µm — inside CO allowed zone; not saved')
+        # Recompute the die from the moved blocks after mouse events complete.
+        QTimer.singleShot(0,self._paint)
 
     def repack(self):
         from .co_macros import allocate_macro_rectangles,MacroConstraintError
         try:
-            rows,_=allocate_macro_rectangles(self.blocks,self.spec['spacing'],mode='compact',
+            rows,_=allocate_macro_rectangles(self.blocks,self.spec['packing_spacing'],mode='compact',
                 region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
             self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
             self._paint()
@@ -1156,8 +1266,7 @@ class Window(QMainWindow):
                 'blocks':data.get('blocks'),'spacing':data.get('spacing'),
                 'notice':'This is a requested placement plan; final DEF/GDS must be checked separately.'},indent=2))
             if self.mask_svg_widget is None:
-                from PySide6.QtSvgWidgets import QSvgWidget
-                self.mask_svg_widget=QSvgWidget()
+                self.mask_svg_widget=AspectPreservingSvgWidget()
                 self.physical_layout.addWidget(self.mask_svg_widget,4)
             self.mask_svg_widget.load(str(path))
             self.tabs.setCurrentIndex(3)
@@ -1180,8 +1289,7 @@ class Window(QMainWindow):
                 'modules':data['modules'], 'pruned':data['pruned'],
                 'warnings':data['warnings']},indent=2))
             if self.mask_svg_widget is None:
-                from PySide6.QtSvgWidgets import QSvgWidget
-                self.mask_svg_widget=QSvgWidget()
+                self.mask_svg_widget=AspectPreservingSvgWidget()
                 self.physical_layout.addWidget(self.mask_svg_widget,4)
             self.mask_svg_widget.load(str(path))
             self.tabs.setCurrentIndex(3)
@@ -1279,8 +1387,7 @@ class Window(QMainWindow):
             report=render_gds_svg(gds,build/'mask_previews'/(gds.stem+'.svg'),top=manifest['top'])
             self.physical_message.setPlainText(json.dumps({'layout':manifest,'preview':report.as_dict()},indent=2))
             if self.mask_svg_widget is None:
-                from PySide6.QtSvgWidgets import QSvgWidget
-                self.mask_svg_widget=QSvgWidget()
+                self.mask_svg_widget=AspectPreservingSvgWidget()
                 self.physical_layout.addWidget(self.mask_svg_widget,4)
             self.mask_svg_widget.load(report.svg)
             self.tabs.setCurrentIndex(3)
@@ -1301,12 +1408,12 @@ class Window(QMainWindow):
                 report=render_gds_svg(Path(file),dest,top=name.strip())
             self.physical_message.setPlainText(json.dumps(report.as_dict(),indent=2))
             if self.mask_svg_widget is None:
-                try:from PySide6.QtSvgWidgets import QSvgWidget
+                try:from PySide6.QtSvg import QSvgRenderer
                 except ImportError as exc:
                     self.physical_message.appendPlainText('WARNING: QtSvgWidgets unavailable; actual SVG was saved to '+str(dest))
                     self.tabs.setCurrentIndex(3)
                     return
-                self.mask_svg_widget=QSvgWidget()
+                self.mask_svg_widget=AspectPreservingSvgWidget()
                 self.physical_layout.addWidget(self.mask_svg_widget,4)
             self.mask_svg_widget.load(str(dest))
             self.tabs.setCurrentIndex(3)

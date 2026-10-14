@@ -87,7 +87,7 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
     """Read strict, reusable CO specification without invoking EDA tools."""
     if not isinstance(raw, dict) or raw.get('enabled') is not True:
         raise MacroConstraintError('CO.MACROS_CONFIG: physical_macros.enabled must be true')
-    allowed = {'enabled', 'enforcement', 'top_module', 'top_rtl', 'blocks', 'spacing', 'halo_um', 'placement'}
+    allowed = {'enabled', 'enforcement', 'top_module', 'top_rtl', 'blocks', 'spacing', 'halo_um', 'placement', 'auto_core_utilization'}
     if set(raw) - allowed:
         raise MacroConstraintError('CO.MACROS_UNKNOWN: ' + ', '.join(sorted(set(raw)-allowed)))
     if raw.get('enforcement') != 'required':
@@ -99,14 +99,20 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
     top_body = top_rtl.read_text(encoding='utf-8')
     if not re.search(r'\bmodule\s+'+re.escape(top)+r'\s*\(', top_body):
         raise MacroConstraintError('CO.MACROS_TOP: top RTL does not declare '+top)
+    auto_util = _positive(raw.get('auto_core_utilization', 45), 'auto_core_utilization', low=0, high=90)
     spacing = raw.get('spacing', {})
-    if not isinstance(spacing, dict) or set(spacing)-{'min_um','preferred_um','max_um'}:
+    if not isinstance(spacing, dict) or set(spacing)-{'min_um','preferred_um','max_um','pdn_min_um'}:
         raise MacroConstraintError('CO.MACROS_SPACING: require min_um, preferred_um and max_um')
     minimum = _positive(spacing.get('min_um', 5), 'spacing.min_um')
     preferred = _positive(spacing.get('preferred_um', 10), 'spacing.preferred_um')
     maximum = _positive(spacing.get('max_um', 60), 'spacing.max_um')
     if not minimum <= preferred <= maximum:
         raise MacroConstraintError('CO.MACROS_SPACING: require min <= preferred <= max')
+    pdn_min = None
+    if 'pdn_min_um' in spacing:
+        pdn_min = _positive(spacing['pdn_min_um'], 'spacing.pdn_min_um')
+        if pdn_min < minimum or pdn_min > maximum:
+            raise MacroConstraintError('CO.MACROS_PDN_SPACING: pdn_min_um must be between min_um and max_um')
     halo = _positive(raw.get('halo_um', 5), 'halo_um', low=-1)
     placement = raw.get('placement', {'mode':'compact'})
     if not isinstance(placement, dict) or set(placement)-{'mode','region_um','stayouts_um'}:
@@ -136,7 +142,7 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
         raise MacroConstraintError('CO.MACROS_BLOCKS: expected 2..32 real blocks')
     instances = set(); modules = set(); defined=[]
     for index, b in enumerate(blocks):
-        if not isinstance(b, dict) or set(b)-{'name','module','instance','rtl','die_size_um','clock_port','location_um'}:
+        if not isinstance(b, dict) or set(b)-{'name','module','instance','rtl','die_size_um','preview_size_um','core_utilization','clock_port','location_um'}:
             raise MacroConstraintError(f'CO.MACROS_BLOCK: invalid block definition at index {index}')
         name = _id(b.get('name'), 'block.name')
         mod = _id(b.get('module'), 'block.module')
@@ -153,9 +159,22 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
         if not re.search(r'\b'+re.escape(mod)+r'\s+'+re.escape(inst)+r'\s*\(', top_body):
             raise MacroConstraintError(f'CO.MACROS_BINDING: instance {mod} {inst} not found in {top_rtl.name}')
         dimensions = b.get('die_size_um')
-        if not isinstance(dimensions, list) or len(dimensions) != 2:
-            raise MacroConstraintError(f'CO.MACROS_DIMENSIONS: {name} requires [width,height]')
-        width,height = (_positive(v, f'{name}.die_size_um', low=20, high=10000) for v in dimensions)
+        auto_die = dimensions == 'auto'
+        if auto_die:
+            # Editor-only estimate before synthesis has produced an actual LEF.
+            # The physical macro always uses the LEF dimensions emitted by
+            # LibreLane's relative floorplanner, NOT this preview estimate.
+            preview = b.get('preview_size_um', [160, 160])
+            if not isinstance(preview, list) or len(preview) != 2:
+                raise MacroConstraintError(f'CO.MACROS_DIMENSIONS: {name}.preview_size_um requires [width,height]')
+            width,height = (_positive(v, f'{name}.preview_size_um', low=20, high=10000) for v in preview)
+        else:
+            if 'preview_size_um' in b:
+                raise MacroConstraintError(f'CO.MACROS_DIMENSIONS: {name}.preview_size_um is only valid with die_size_um: auto')
+            if not isinstance(dimensions, list) or len(dimensions) != 2:
+                raise MacroConstraintError(f'CO.MACROS_DIMENSIONS: {name} requires [width,height] or auto')
+            width,height = (_positive(v, f'{name}.die_size_um', low=20, high=10000) for v in dimensions)
+        utilization = _positive(b.get('core_utilization', auto_util), f'{name}.core_utilization',low=0,high=90)
         clock = b.get('clock_port', 'clk' if re.search(r'\binput\s+(?:wire\s+)?clk\b', match.group(1)) else None)
         if clock is not None:
             _id(clock, f'{name}.clock_port')
@@ -167,13 +186,27 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
                 raise MacroConstraintError(f'CO.MACROS_LOCATION: {name}.location_um must be [x,y] nonnegative microns')
             location=[float(v) for v in location]
         defined.append({'name':name,'module':mod,'instance':inst,'rtl':rtl,'ports':match.group(1),
-                        'width':width,'height':height,'clock':clock,'location_um':location})
+                        'width':width,'height':height,'die_mode':'auto' if auto_die else 'fixed',
+                        'core_utilization':utilization,'core_utilization_explicit':'core_utilization' in b,
+                        'clock':clock,'location_um':location})
     if placement_mode=='manual' and any(b['location_um'] is None for b in defined):
         raise MacroConstraintError('CO.MACROS_LOCATION: manual placement requires location_um for every block')
     if placement_mode!='manual' and any(b['location_um'] is not None for b in defined):
         raise MacroConstraintError('CO.MACROS_LOCATION: location_um requires placement.mode: manual')
+    # OpenROAD's met1 channel repair can fail when the nominal gap between
+    # multiple SKY130 hard macros leaves only ~15 um after placement halos.
+    # For four or more automatically packed macros, reserve 60 um between
+    # macro bodies, subject to the user's hard maximum. Explicit manual
+    # coordinates are never moved. pdn_min_um overrides this heuristic.
+    # This is placement-risk mitigation, NOT evidence that PDN will pass.
+    pdn_target = (pdn_min if pdn_min is not None else
+                  (60.0 if physical.get('pdk','').lower() == 'sky130a' and len(defined) >= 4 else 0.0))
+    pack_preferred = min(maximum, max(preferred, pdn_target))
+    packing_spacing = {'min_um': minimum, 'preferred_um': pack_preferred, 'max_um': maximum}
     return {'top':top,'top_rtl':top_rtl,'blocks':defined,'spacing':{'min_um':minimum,'preferred_um':preferred,'max_um':maximum},
-            'halo_um':halo,'placement_mode':placement_mode,'placement_region_um':region,'placement_stayouts_um':stayouts}
+            'halo_um':halo,'placement_mode':placement_mode,'placement_region_um':region,'placement_stayouts_um':stayouts,
+            'packing_spacing':packing_spacing,'pdn_placement_target_um':pdn_target,
+            'auto_core_utilization':auto_util}
 
 
 def read_lef_size(path, module):
@@ -245,6 +278,36 @@ def _dimensioned_rect(block, x, y):
             'x_um':round(x,4),'y_um':round(y,4),'width_um':w,'height_um':h}
 
 
+def autosized_macro_die(rows, *, margin_um=30.0):
+    """Return a die sized from *actual placed* hard-macro bounding boxes.
+
+    CO placement.region_um is the permitted macro placement extent, not an
+    implicit die size. Area outside the macro bodies is needed for the top
+    wrapper, pins, power grid and routing; this statistic is NOT cell density.
+    The margin is intentionally retained around the outermost macro geometry.
+    """
+    if not rows:
+        raise MacroConstraintError('CO.MACROS_DIE: no placed macros')
+    margin = _positive(margin_um, 'die.margin_um', low=0)
+    right = max(r['x_um'] + r['width_um'] for r in rows)
+    upper = max(r['y_um'] + r['height_um'] for r in rows)
+    die = [round(right + margin, 2), round(upper + margin, 2)]
+    macro_area = sum(r['width_um'] * r['height_um'] for r in rows)
+    die_area = die[0] * die[1]
+    if die_area <= 0:
+        raise MacroConstraintError('CO.MACROS_DIE: invalid die geometry')
+    return {
+        'die_area_um': [0.0, 0.0, *die],
+        'width_um': die[0], 'height_um': die[1],
+        'macro_area_um2': round(macro_area, 3),
+        'macro_coverage_percent': round(100.0 * macro_area / die_area, 2),
+        'reserved_for_routing_pdn_and_top_cells_percent': round(100.0 * (1 - macro_area / die_area), 2),
+        'sizing_basis': 'placed_macro_bounds_plus_margin',
+        'margin_um': margin,
+        'meaning': 'Geometric hard-macro footprint only, not utilization of standard cells or verified routability',
+    }
+
+
 def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_um=None, stayouts_um=(), halo_um=0):
     """Place real LEF-sized hard macros with selectable CO row/compact/manual mode.
 
@@ -258,8 +321,8 @@ def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_
     gap=spacing['preferred_um']
 
     def die(rows):
-        return [round(max(r['x_um']+r['width_um'] for r in rows)+margin,2),
-                round(max(r['y_um']+r['height_um'] for r in rows)+margin,2)]
+        info = autosized_macro_die(rows, margin_um=margin)
+        return [info['width_um'], info['height_um']]
 
     if mode=='manual':
         rows=[]
@@ -332,10 +395,10 @@ def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_
                 dw,dh=die(rows)
                 corew=dw-2*margin;coreh=dh-2*margin
                 area=corew*coreh
-                # A modest perimeter cost encourages a dense, reasonably
-                # compact cluster without expanding area only for aesthetics.
-                score=area+0.075*(corew+coreh)**2
-                rank=(round(score,4),round(area,4),round(abs(corew-coreh),4),order,vertical,limit)
+                # Silicon area is the primary objective. Prefer squarer
+                # placements only on an equal-area tie, not at the expense
+                # of a materially larger die.
+                rank=(round(area,4),round(corew+coreh,4),round(abs(corew-coreh),4),order,vertical,limit)
                 if best is None or rank<best[0]:best=(rank,rows,[dw,dh])
     if best is None and region_um is not None:
         # Place candidates next to region origin, stay-out boundaries and
@@ -393,16 +456,24 @@ def render_co_macro_plan_svg(rows, die, path):
     fills=('#335d8e','#38785e','#8e6735','#74458d','#8b4451')
     parts=[f'<svg xmlns="http://www.w3.org/2000/svg" width="{width:.2f}" height="{height:.2f}" viewBox="0 0 {width:.2f} {height:.2f}">',
            f'<rect x="0" y="0" width="{width:.2f}" height="{height:.2f}" fill="#f4f7fa"/>',
-           '<text x="15" y="24" font-family="Arial" font-size="15" fill="#283748">CO HARD MACRO PLACEMENT PLAN — not GDS signoff</text>',
+           f'<text x="15" y="24" font-family="Arial" font-size="14" fill="#283748">CO MACRO PLAN · {dw:.0f} × {dh:.0f} µm · not signoff</text>',
            f'<rect x="{margin}" y="{margin+38}" width="{dw*scale:.2f}" height="{dh*scale:.2f}" fill="#e7eef4" stroke="#61758a" stroke-width="2"/>']
     for i,b in enumerate(rows):
         x=margin+b['x_um']*scale
         y=margin+38+(dh-b['y_um']-b['height_um'])*scale
         w,h=b['width_um']*scale,b['height_um']*scale
         name=escape(b['name']); inst=escape(b['instance'])
-        parts.extend([f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="{fills[i%len(fills)]}" stroke="#18334a" stroke-width="2"/>',
-                      f'<text x="{x+5:.2f}" y="{y+19:.2f}" font-family="Arial" font-size="14" font-weight="bold" fill="white">{name}</text>',
-                      f'<text x="{x+5:.2f}" y="{y+36:.2f}" font-family="Arial" font-size="12" fill="white">{inst}</text>'])
+        # Clip labels inside their own rectangles, rather than allowing them to
+        # overprint adjoining macros (particularly in narrow SVG preview tabs).
+        # The full names remain available in SVG hover titles.
+        label_size=min(14.,max(6.,(w-10)/max(1,len(b['name']))/0.59))
+        instance_size=min(12.,max(6.,(w-10)/max(1,len(b['instance']))/0.59))
+        parts.extend([f'<clipPath id="macro_clip_{i}"><rect x="{x+3:.2f}" y="{y+3:.2f}" width="{max(1,w-6):.2f}" height="{max(1,h-6):.2f}"/></clipPath>',
+                      f'<rect x="{x:.2f}" y="{y:.2f}" width="{w:.2f}" height="{h:.2f}" fill="{fills[i%len(fills)]}" stroke="#18334a" stroke-width="2"><title>{name} ({inst})</title></rect>',
+                      f'<g clip-path="url(#macro_clip_{i})">',
+                      f'<text x="{x+5:.2f}" y="{y+5+label_size:.2f}" font-family="Arial" font-size="{label_size:.2f}" font-weight="bold" fill="white">{name}</text>',
+                      f'<text x="{x+5:.2f}" y="{y+9+label_size+instance_size:.2f}" font-family="Arial" font-size="{instance_size:.2f}" fill="white">{inst}</text>',
+                      '</g>'])
     parts.append('</svg>')
     Path(path).write_text('\n'.join(parts)+'\n',encoding='utf-8')
 
@@ -459,36 +530,128 @@ def gds_referenced_structures(path):
 
 
 def collect_pdn_errors(physical_log):
-    """Return first meaningful PSM/PDN errors from a LibreLane console log.
+    """Parse real LibreLane/OpenROAD PDN errors, including wrapped Rich logs.
 
-    This diagnostic does not alter the LibreLane return code, power nets, or
-    verification. Its purpose is to surface the geometry connectivity failure
-    before a generic external-tool-exit exception.
+    The old implementation overlooked PDN-0178/0179 and misreported this
+    exact failure as NO_PDN_FINDINGS. This remains diagnostic only: it never
+    changes the physical return status or grants power-grid signoff.
     """
     path=Path(physical_log)
     if not path.is_file():
-        return {'status':'NO_LOG','findings':[]}
-    log=path.read_text(errors='replace')
-    # Hyperlinks and terminal color codes generated by Rich console logging.
-    log=re.sub(r'\x1b\][^\x1b]*\x1b\\','',log)
+        return {'status':'NO_LOG','findings':[], 'remaining_channels':[]}
+    log=path.read_text(encoding='utf-8',errors='replace')
+    log=re.sub(r'\x1b\][^\x1b]*(?:\x1b\\|\x07)','',log)
     log=re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]','',log)
+    # Rich wraps native OpenROAD warnings over several lines; omit its
+    # progress redraws so a single geometrical channel can be recovered.
+    native='\n'.join(re.sub(r'^\[(?:STDOUT|STDERR)\]\s*','',line).strip()
+                     for line in log.splitlines()
+                     if not ('Classic - Stage' in line and '━━━━━━━━' in line))
+    native=re.sub(r'\b(?:openroad|flow)\.py:\d+\b', '', native)
     findings=[]
-    for key in ('PSM-0069','PSM-0039','PSM-0038','PDN-0110'):
-        matches=list(re.finditer(re.escape(key),log))
+    for key in ('PSM-0069','PSM-0039','PSM-0038','PDN-0110','PDN-0178','PDN-0179'):
+        matches=list(re.finditer(re.escape(key),native))
         if matches:
-            # Keep a representative match for readable reporting, without the
-            # thousands of progress redraws in the native LibreLane output.
-            excerpt=log[matches[0].start():matches[0].start()+260]
+            excerpt=native[matches[0].start():matches[0].start()+280]
             excerpt=re.sub(r'\s+',' ',excerpt).strip()
-            findings.append({'code':key,'count_in_log':len(matches),
-                             'sample':excerpt[:220]})
-    return {'status':'PDN_CONNECTIVITY_SUSPECT' if any(x['code']=='PSM-0069' for x in findings)
-            else ('PDN_WARNINGS' if findings else 'NO_PDN_FINDINGS'),
-            'findings':findings}
+            findings.append({'code':key,'count_in_log':len(matches),'sample':excerpt[:220]})
+    channel_re=re.compile(
+        r'\[PDN-0178\]\s+Remaining\s+channel\s*'
+        r'\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*-\s*'
+        r'\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*\)\s*'
+        r'on\s+(\w+)\s+for\s+nets:\s*([A-Za-z0-9_, ]+)',re.I)
+    channels=[]
+    for match in channel_re.finditer(native):
+        channel={'bounds_um':[float(match.group(i)) for i in range(1,5)],
+                 'layer':match.group(5),'nets':match.group(6).strip()}
+        if channel not in channels: channels.append(channel)
+    codes={f['code'] for f in findings}
+    status=('PDN_CHANNEL_REPAIR_FAILED' if 'PDN-0179' in codes else
+            'PDN_CONNECTIVITY_SUSPECT' if 'PSM-0069' in codes else
+            'PDN_WARNINGS' if findings else 'NO_PDN_FINDINGS')
+    return {'status':status,'findings':findings,'remaining_channels':channels}
+
+
+
+def classify_macro_hardening_failure(log_path, result):
+    """Report a failed child-macro verification without skipping any checks.
+
+    LibreLane's Classic flow can complete geometry and still return code 2 at
+    its deferred KLayout/Magic XOR checker. Its final native error is often
+    only '1 XOR differences found', not the physical geometry responsible.
+    Preserve the failed state; expose the exact required investigation files.
+    """
+    path = Path(log_path)
+    original = path.read_text(encoding='utf-8', errors='replace') if path.is_file() else ''
+    original += '\n' + str(result.get('stdout_tail') or '')
+    original += '\n' + str(result.get('stderr_tail') or '')
+    original = re.sub(r'\x1b\][^\x1b]*(?:\x1b\\|\x07)', '', original)
+    original = re.sub(r'\x1b\[[0-9;?]*[ -/]*[@-~]', '', original)
+    matches = re.findall(r'\b(\d+)\s+XOR\s+differences?\s+found\b', original, re.I)
+    if matches:
+        return {
+            'status': 'MAGIC_KLAYOUT_XOR_MISMATCH',
+            'xor_difference_count': max(map(int, matches)),
+            'log': str(path),
+            'interpretation': 'Different GDS geometries in Magic and KLayout stream-outs; not a CPU XOR instruction or DLS equivalence failure.',
+            'remedy': 'Inspect this macro run KLayout.XOR output/metrics and compare the Magic and KLayout GDS layers; do not disable ERROR_ON_XOR_ERROR or RUN_KLAYOUT_XOR to claim signoff.'
+        }
+    return {'status': 'MACRO_HARDENING_FAILED', 'log': str(path),
+            'remedy': 'Inspect the full child-macro LibreLane log for the first native fatal error.'}
 
 
 def _write_json(path,obj):
     atomic_write(Path(path),json.dumps(obj,indent=2)+'\n')
+
+
+def child_macro_librelane_config(block, physical):
+    """Physically size child macros from synthesis, unless CO pins an explicit die.
+
+    In relative mode, LibreLane computes core dimensions using the cell area
+    after synthesis and the chosen FP_CORE_UTIL; the generated LEF (not the
+    source preview hint) is the source of truth for top-level packing.
+    """
+    config={'DESIGN_NAME':block['module'], 'VERILOG_FILES':['dir::design.v'],
+            'PDK':physical['pdk'],
+            'STD_CELL_LIBRARY':physical.get('std_cell_library','sky130_fd_sc_hd'),
+            'FP_CORE_UTIL':(block['core_utilization'] if block.get('die_mode')=='auto' or
+                            block.get('core_utilization_explicit') else physical.get('core_utilization',25)),
+            'PDN_ENABLE_RAILS':True,'PDN_ENABLE_GLOBAL_CONNECTIONS':True,
+            'PDN_MULTILAYER':False,'PDN_ENABLE_PINS':True}
+    if block.get('die_mode','fixed')=='auto':
+        config['FP_SIZING']='relative'
+        config['FP_ASPECT_RATIO']=1.0
+    else:
+        # Preserve existing fixed-die projects and their exact input hashes.
+        config['DIE_AREA']=[0,0,block['width'],block['height']]
+        config['CORE_AREA']=[10,10,block['width']-10,block['height']-10]
+    if block['clock']:
+        config['CLOCK_PORT']=block['clock']
+        config['CLOCK_PERIOD']=physical['clock_period_ns']
+    return config
+
+
+def child_macro_cache_digest(block, physical, config=None):
+    """Hash actual RTL and complete sizing configuration for safe view reuse."""
+    config = child_macro_librelane_config(block, physical) if config is None else config
+    return hashlib.sha256(
+        block['rtl'].read_bytes()+json.dumps(config,sort_keys=True).encode()+
+        str(physical.get('pdk_root','')).encode()
+    ).hexdigest()
+
+
+def cached_macro_lef_size(project_root, block, physical):
+    """Get a verified-current cached LEF size; never trust an old preview plan."""
+    folder=Path(project_root)/'build'/'co_macro_cache'/block['module']
+    stamp=folder/'source.sha256'
+    digest=child_macro_cache_digest(block,physical)
+    if not stamp.is_file() or stamp.read_text(encoding='utf-8').strip()!=digest:
+        return None
+    try:
+        path=final_view(folder/'runs'/('hard_'+digest[:14]),'lef',block['module'],'.lef')
+        return read_lef_size(path,block['module'])
+    except (MacroConstraintError,OSError,ValueError):
+        return None
 
 
 def run_native_macro_flow(session, preflight):
@@ -510,22 +673,11 @@ def run_native_macro_flow(session, preflight):
     for b in co['blocks']:
         folder=cache/b['module'];folder.mkdir(parents=True,exist_ok=True)
         shutil.copyfile(b['rtl'],folder/'design.v')
-        config={'DESIGN_NAME':b['module'],'VERILOG_FILES':['dir::design.v'],
-                'PDK':physical['pdk'],'STD_CELL_LIBRARY':physical.get('std_cell_library','sky130_fd_sc_hd'),
-                'FP_CORE_UTIL':physical.get('core_utilization',25),
-                'DIE_AREA':[0,0,b['width'],b['height']],
-                'CORE_AREA':[10,10,b['width']-10,b['height']-10],
-                'PDN_ENABLE_RAILS':True,'PDN_ENABLE_GLOBAL_CONNECTIONS':True,
-                # Child blocks need to expose their power pins on the lower
-                # metal-grid layer so the parent's upper grid can via into them.
-                'PDN_MULTILAYER':False,'PDN_ENABLE_PINS':True}
-        if b['clock']:
-            config['CLOCK_PORT']=b['clock'];config['CLOCK_PERIOD']=physical['clock_period_ns']
+        config=child_macro_librelane_config(b,physical)
         _write_json(folder/'config.json',config)
         # Archive-backed build directories have separate lifetimes; do not reuse
         # a cached macro without proving it comes from the same RTL and config.
-        digest=hashlib.sha256(b['rtl'].read_bytes()+json.dumps(config,sort_keys=True).encode()+
-                              str(physical.get('pdk_root','')).encode()).hexdigest()
+        digest=child_macro_cache_digest(b,physical,config)
         stamp=folder/'source.sha256';tag='hard_'+digest[:14]
         run=folder/'runs'/tag
         valid=False
@@ -551,10 +703,21 @@ def run_native_macro_flow(session, preflight):
             ret=run_external(cmd,folder,folder,session.issues,session.events,
                              f'macro_{b["module"]}',timeout=physical.get('timeout_s',14400),**opts)
             if ret['status']!='PASS':
-                issue=session.issues.add('CO.MACROS_HARDENING_FAILED','ERROR','PHYSICAL','physical',
-                    f'Required macro {b["module"]} failed to harden in LibreLane.',evidence=ret)
+                diagnostic=classify_macro_hardening_failure(folder/('macro_'+b['module']+'.log'),ret)
+                diagnostic.update(module=b['module'],run_tag=tag,run_directory=str(run),
+                                  source_rtl=str(b['rtl']))
+                diagnostic_path=root/'macro_hardening_diagnostics.json'
+                _write_json(diagnostic_path,diagnostic)
+                session.result.files['macro_hardening_diagnostics']=str(diagnostic_path)
+                xor_failure=diagnostic['status']=='MAGIC_KLAYOUT_XOR_MISMATCH'
+                issue=session.issues.add(
+                    'CO.MACROS_XOR_MISMATCH' if xor_failure else 'CO.MACROS_HARDENING_FAILED',
+                    'ERROR','PHYSICAL','physical',
+                    (f'Child macro {b["module"]} has {diagnostic["xor_difference_count"]} Magic/KLayout GDS XOR differences; physical verification failed.'
+                     if xor_failure else f'Required macro {b["module"]} failed to harden in LibreLane.'),
+                    remedy=diagnostic['remedy'],evidence={**ret,'macro_diagnostics':diagnostic})
                 session._done('physical','FAIL',block=b['module'],failed_step='macro_hardening',
-                              issue_id=issue.issue_id,result=ret)
+                              issue_id=issue.issue_id,result=ret,diagnostics=str(diagnostic_path))
                 return
             all_views[b['module']]={k:final_view(run,v,b['module'],s) for k,v,s in
                                      [('gds','gds','.gds'),('lef','lef','.lef'),('nl','nl','.v')]}
@@ -594,14 +757,22 @@ def run_native_macro_flow(session, preflight):
         raise MacroConstraintError('CO.MACROS_SOURCE_CHANGED: source RTL changed during macro hardening')
     dims=[]
     power_pin_evidence={}
+    child_sizing={}
     for b in co['blocks']:
         view=all_views[b['module']]['lef']
         power_pin_evidence[b['module']]=inspect_macro_lef_power(view,b['module'])
-        dims.append({**b,'size_um':read_lef_size(view,b['module'])})
-    plan,die=allocate_macro_rectangles(dims,co['spacing'],mode=co['placement_mode'],
+        measured=read_lef_size(view,b['module'])
+        dims.append({**b,'size_um':measured})
+        child_sizing[b['module']]={'mode':b['die_mode'], 'lef_size_um':measured,
+                                  'target_core_utilization_percent':b['core_utilization'],
+                                  'preview_hint_used_for_physical':False}
+    plan,die=allocate_macro_rectangles(dims,co['packing_spacing'],mode=co['placement_mode'],
         region_um=co['placement_region_um'],stayouts_um=co['placement_stayouts_um'],halo_um=co['halo_um'])
     for r in plan:
         r['min_spacing_um']=co['spacing']['min_um'];r['max_spacing_um']=co['spacing']['max_um']
+    die_metrics=autosized_macro_die(plan)
+    if [die_metrics['width_um'],die_metrics['height_um']] != die:
+        raise MacroConstraintError('CO.MACROS_DIE: placer and physical die dimensions disagree')
     plan_preview=root/'co_macro_floorplan.svg'
     render_co_macro_plan_svg(plan,die,plan_preview)
     session.result.files['co_macro_floorplan']=str(plan_preview)
@@ -635,7 +806,11 @@ def run_native_macro_flow(session, preflight):
     # die/core settings must not silently conflict with real macro dimensions.
     _write_json(session.out/'config.json',topcfg)
     _write_json(root/'co_macro_plan.json',{'status':'REQUESTED_NOT_YET_VERIFIED','blocks':plan,
-                                         'top':co['top'],'spacing':co['spacing'],'placement_mode':co['placement_mode'],
+                                         'top':co['top'],'spacing':co['spacing'],'packing_spacing':co['packing_spacing'],
+                                         'pdn_placement_target_um':co['pdn_placement_target_um'],
+                                         'placement_mode':co['placement_mode'],
+                                         'auto_die':die_metrics,'child_sizing':child_sizing,
+                                         'placement_region_um':co['placement_region_um'],
                                          'pdn':{'top_hpitch_um':pdn_hpitch,'top_vpitch_um':pdn_vpitch,
                                                 'child_multilayer':False,'child_power_pins':power_pin_evidence,
                                                 'verification':'Electrical connectivity still must pass LibreLane'},
@@ -657,7 +832,9 @@ def run_native_macro_flow(session, preflight):
         session.result.files['macro_pdn_diagnostics']=str(root/'pdn_diagnostics.json')
         issue=session.issues.add('CO.MACROS_TOP_FAILED','ERROR','PHYSICAL','physical',
             'Required modular top-level placement/routing failed.' +
-            (' PSM-0069: power grid connectivity failed; inspect co_macros/pdn_diagnostics.json.'
+            (' PDN-0179: power-grid channel repair failed; inspect co_macros/pdn_diagnostics.json and macro clearances.'
+             if pdn_diagnostic['status']=='PDN_CHANNEL_REPAIR_FAILED' else
+             ' PSM-0069: power grid connectivity failed; inspect co_macros/pdn_diagnostics.json.'
              if pdn_diagnostic['status']=='PDN_CONNECTIVITY_SUSPECT' else ''),
             evidence={**result,'pdn_diagnostics':pdn_diagnostic})
         session._done('physical',result['status'],issue_id=issue.issue_id,result=result);return
@@ -772,11 +949,18 @@ def verify_cached_macro_children(session, layout_manifest, physical, runner_opti
                               f'macro_signoff_{module}',
                               timeout=physical.get('timeout_s',14400), **runner_options)
         if result['status'] != 'PASS':
+            diagnostic=classify_macro_hardening_failure(folder/('macro_signoff_'+module+'.log'),result)
+            # An XOR count is a real failed geometry check, not a reason to
+            # downgrade or suppress verification. Preserve that failure and
+            # explain exactly which child GDS pair must be inspected.
             issue = session.issues.add('VERIFY.MACRO_SIGNOFF_FAILED', 'ERROR', 'PHYSICAL',
-                'macro_signoff', f'LibreLane signoff failed for {module}.', evidence=result,
-                remedy='Inspect the macro signoff log; do not treat a GDS XOR difference as a passing mask.')
+                'macro_signoff', f'LibreLane signoff failed for {module}.' +
+                (f' Magic/KLayout GDS XOR count: {diagnostic["xor_difference_count"]}.'
+                 if diagnostic['status']=='MAGIC_KLAYOUT_XOR_MISMATCH' else ''),
+                evidence={**result,'macro_diagnostics':diagnostic},
+                remedy=diagnostic['remedy'])
             session._done('macro_signoff', 'FAIL', module=module,
-                          issue_id=issue.issue_id, result=result)
+                          issue_id=issue.issue_id, result=result, diagnostics=diagnostic)
             return False
         # Verification must never silently replace the original layout.
         if not all(path.is_file() and artifact_hash(path) == expected for path,expected in files):

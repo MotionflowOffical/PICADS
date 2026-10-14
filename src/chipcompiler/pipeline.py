@@ -443,7 +443,18 @@ class BuildSession:
         # It consumes the explicitly named physical RTL blocks, not the
         # flattened DLS top. Never imply Python/RTL sequential equivalence.
         macro_spec=self.project.co.get('physical_macros')
-        if macro_spec and macro_spec.get('enabled'):
+        # The GUI's F7 Synthesize action (mode='build') is a DLS/Yosys
+        # synthesis action, NOT a physical run. Previously it accidentally
+        # entered full hard-macro LibreLane signoff and failed in KLayout.XOR,
+        # even though the user had not selected layout or signoff. Preserve
+        # the normal synthesized.v path below and keep CO RTL separate from
+        # the independently generated Python/DLS hardware model.
+        if macro_spec and macro_spec.get('enabled') and self.mode == 'build':
+            self._done('co_macro_physical', 'DEFERRED',
+                reason='Synthesize generates the Python/DLS Yosys netlist only; select Generate Physical Layout (GDS) for CO hard macros.',
+                physical_rtl_source='INDEPENDENT_FROM_DLS',
+                physical_source_equivalence='NOT_ESTABLISHED')
+        if self.mode in ('physical','layout') and macro_spec and macro_spec.get('enabled'):
             from .co_macros import run_native_macro_flow, MacroConstraintError
             execution=(self.project.config.get('tools') or {}).get('execution','native')
             distribution=(self.project.config.get('tools') or {}).get('wsl_distribution')
