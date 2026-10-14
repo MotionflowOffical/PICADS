@@ -1,5 +1,8 @@
 # Chip Compiler languages and actual semantics
 
+> **Current authoring guide:** For a PICADS-wide explanation of Python, restricted C/C++, MCD, CO, Verilog macros, DLS, generated physical files, and how to choose among them, read [Programming languages and design-file contract](PROGRAMMING_LANGUAGES_AND_DESIGN_FILES.md) and [Practical authoring workflow](PICADS_LANGUAGE_AUTHORING_WORKFLOW.md). This older page retains historical subset details; r9d adds a separate CO-selected RTL macro path.
+
+
 `chip.yaml` selects the source and optional module (`.mcd`) / architecture (`.co`) YAML files. The generated `.dls` file is a versioned JSON description of **actual primitive gates and state**, not opaque math operators.
 
 ## Editable MCD (Module and Chip Description)

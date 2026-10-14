@@ -1,3 +1,7 @@
+## PICADS authoring guide — languages and design files (documentation update)
+
+New to PICADS, or deciding whether to edit `circuit.py`, `design.mcd`, `architecture.co`, or Verilog? Start with **[Programming languages and design-file contract](docs/PROGRAMMING_LANGUAGES_AND_DESIGN_FILES.md)** and the **[step-by-step authoring workflow](docs/PICADS_LANGUAGE_AUTHORING_WORKFLOW.md)**. These guides document the actual PICADS r9d behavior and explicitly distinguish restricted Python/C compilation from CO-selected independent hard-macro Verilog. They apply to PICADS projects generally, **not to any one CPU example**.
+
 ## r9d — CO floorplan drag-and-drop with enforced stay-outs
 
 Use **Physical / Masks → Edit CO Floorplan (Drag and Drop)** to move real RTL macros. CO `physical_macros.placement.region_um` sets the allowed cyan placement area; `stayouts_um` defines prohibited red areas. Blocks cannot cross those boundaries while dragging and still respect macro spacing/halos. Existing `floorplan.keepouts` marked `hard` and `required` are enforced as well. Invalid positions cannot be saved, and automatic packing uses the same exclusions. See [CO zone and drag constraints](docs/CO_DRAG_DROP_STAYOUTS_r9d.md). This does **not** prevent signal/power routing over a blocked zone.
