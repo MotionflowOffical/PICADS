@@ -115,8 +115,15 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
             raise MacroConstraintError('CO.MACROS_PDN_SPACING: pdn_min_um must be between min_um and max_um')
     halo = _positive(raw.get('halo_um', 5), 'halo_um', low=-1)
     placement = raw.get('placement', {'mode':'compact'})
-    if not isinstance(placement, dict) or set(placement)-{'mode','region_um','stayouts_um'}:
+    if not isinstance(placement, dict) or set(placement)-{'mode','region_um','stayouts_um','grid_um','die_size_um'}:
         raise MacroConstraintError('CO.MACROS_PLACEMENT: expected placement: {mode: compact|row|manual}')
+    die_spec = placement.get('die_size_um', 'auto')
+    if die_spec != 'auto':
+        if not isinstance(die_spec, list) or len(die_spec) != 2:
+            raise MacroConstraintError('CO.MACROS_DIE: placement.die_size_um must be auto or [width, height]')
+        die_spec = [_positive(v, 'placement.die_size_um', low=20, high=100000)
+                    for v in die_spec]
+    grid_um = _positive(placement.get('grid_um', 0), 'placement.grid_um', low=-1, high=25)
     placement_mode = placement.get('mode', 'compact')
     if placement_mode not in ('compact', 'row', 'manual'):
         raise MacroConstraintError('CO.MACROS_PLACEMENT: mode must be compact, row or manual')
@@ -205,7 +212,7 @@ def read_macro_constraints(raw, project_root, physical, floorplan=None):
     packing_spacing = {'min_um': minimum, 'preferred_um': pack_preferred, 'max_um': maximum}
     return {'top':top,'top_rtl':top_rtl,'blocks':defined,'spacing':{'min_um':minimum,'preferred_um':preferred,'max_um':maximum},
             'halo_um':halo,'placement_mode':placement_mode,'placement_region_um':region,'placement_stayouts_um':stayouts,
-            'packing_spacing':packing_spacing,'pdn_placement_target_um':pdn_target,
+            'packing_spacing':packing_spacing,'pdn_placement_target_um':pdn_target,'placement_grid_um':grid_um,'die_size_um':die_spec,
             'auto_core_utilization':auto_util}
 
 
@@ -308,7 +315,40 @@ def autosized_macro_die(rows, *, margin_um=30.0):
     }
 
 
-def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_um=None, stayouts_um=(), halo_um=0):
+def effective_macro_die(rows, *, mode='compact', die_size_um='auto', halo_um=0, margin_um=30.0):
+    """Die width/height for the real layout, not the permissive CO region.
+
+    Automatic mode always takes the smallest envelope for the CURRENT legal
+    placement, with its reserved external margin. Manual explicit dimensions
+    are mandatory limits; they must contain macro geometry plus core/PDN halo.
+    """
+    computed = autosized_macro_die(rows, margin_um=margin_um)
+    if mode != 'manual' or die_size_um == 'auto':
+        return computed
+    if not isinstance(die_size_um,(tuple,list)) or len(die_size_um)!=2:
+        raise MacroConstraintError('CO.MACROS_DIE: expected manual [width,height]')
+    w,h=map(float,die_size_um)
+    if not all(math.isfinite(v) and v>20 for v in (w,h)):
+        raise MacroConstraintError('CO.MACROS_DIE: explicit chip dimensions must exceed 20 um')
+    # The generated CORE_AREA inset is ten micrometres. It must contain the
+    # macro body and its requested halo; a die-size field cannot waive that.
+    inset = 10.0 + float(halo_um)
+    for r in rows:
+        if (r['x_um'] < inset-1e-6 or r['y_um'] < inset-1e-6 or
+            r['x_um']+r['width_um'] > w-inset+1e-6 or
+            r['y_um']+r['height_um'] > h-inset+1e-6):
+            raise MacroConstraintError(
+                f'CO.MACROS_DIE: {r["instance"]} does not fit in {w:g} x {h:g} um die '
+                f'with {inset:g} um core/halo edge clearance')
+    area=w*h
+    return {**computed,'die_area_um':[0.,0.,round(w,3),round(h,3)],
+            'width_um':round(w,3),'height_um':round(h,3),
+            'macro_coverage_percent':round(100*computed['macro_area_um2']/area,2),
+            'reserved_for_routing_pdn_and_top_cells_percent':round(100*(1-computed['macro_area_um2']/area),2),
+            'sizing_basis':'manual_explicit_die',
+            'meaning':'User-defined die bounding box validated against physical core/halo; routing/signoff still unverified'}
+
+def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_um=None, stayouts_um=(), halo_um=0, grid_um=0):
     """Place real LEF-sized hard macros with selectable CO row/compact/manual mode.
 
     Compact mode enumerates deterministic horizontal and vertical shelf layouts
@@ -393,12 +433,11 @@ def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_
                     check_macro_placement_zones(rows,region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
                 except MacroConstraintError:continue
                 dw,dh=die(rows)
-                corew=dw-2*margin;coreh=dh-2*margin
-                area=corew*coreh
-                # Silicon area is the primary objective. Prefer squarer
-                # placements only on an equal-area tie, not at the expense
-                # of a materially larger die.
-                rank=(round(area,4),round(corew+coreh,4),round(abs(corew-coreh),4),order,vertical,limit)
+                # Actual fabricated DIE_AREA is what costs silicon. Ranking
+                # (die minus two margins) used to underweight perimeter and
+                # could choose a physically LARGER die than another candidate.
+                area=dw*dh
+                rank=(round(area,4),round(dw+dh,4),round(abs(dw-dh),4),order,vertical,limit)
                 if best is None or rank<best[0]:best=(rank,rows,[dw,dh])
     if best is None and region_um is not None:
         # Place candidates next to region origin, stay-out boundaries and
@@ -443,7 +482,54 @@ def allocate_macro_rectangles(blocks, spacing, *, margin=30, mode='row', region_
             best=((dw*dh,),(rows),[dw,dh])
     if best is None:
         raise MacroConstraintError('CO.MACROS_NO_PLACEMENT: cannot pack required macros within CO placement region, stay-outs and spacing')
+    if grid_um and mode=='compact':
+        # Nearby X/Y coordinates produced from independent fractional LEF
+        # dimensions can create 1-5 um sliver channels for OpenROAD PDN.
+        # Snap compact placements to a common coarse grid, but ONLY if the
+        # resulting rectangles still satisfy all hard CO rules. Never modify
+        # manual positions. A rejected snap leaves the legal plan unchanged.
+        aligned=[]
+        for row in best[1]:
+            aligned.append({**row,
+                'x_um':round(round(row['x_um']/grid_um)*grid_um,4),
+                'y_um':round(round(row['y_um']/grid_um)*grid_um,4)})
+        try:
+            if region_um is None and any(min(r['x_um'],r['y_um'])<margin for r in aligned):
+                raise MacroConstraintError('CO.MACROS_GRID_BORDER: snapped placement crosses die margin')
+            _validate_2d_clearance(aligned,spacing)
+            check_macro_placement_zones(aligned,region_um=region_um,stayouts_um=stayouts_um,halo_um=halo_um)
+        except MacroConstraintError:
+            pass  # Keep the proven-legal unsnapped arrangement.
+        else:
+            return aligned,die(aligned)
     return best[1],best[2]
+
+
+def alternate_pdn_floorplan(blocks, co, previous, increment=20.0):
+    """Propose one distinct, validated, less cramped automatic floorplan.
+
+    The OpenROAD PDN-0179 code alone does not prove this layout will route.
+    Keep user-requested minimum/maximum, placement region and stay-outs hard.
+    Manual mode is never changed or retried automatically.
+    """
+    if co['placement_mode']!='compact':
+        return None
+    spacing=dict(co['packing_spacing'])
+    current=spacing['preferred_um']
+    new=min(spacing['max_um'],round(current+increment,3))
+    if new<=current+1e-6:
+        return None
+    spacing['preferred_um']=new
+    try:
+        plan,die=allocate_macro_rectangles(blocks,spacing,mode='compact',
+            region_um=co['placement_region_um'],stayouts_um=co['placement_stayouts_um'],
+            halo_um=co['halo_um'],grid_um=co['placement_grid_um'])
+    except MacroConstraintError:
+        return None
+    before=[(r['instance'],r['x_um'],r['y_um']) for r in previous]
+    after=[(r['instance'],r['x_um'],r['y_um']) for r in plan]
+    if before==after:return None
+    return plan,die,new
 
 
 def render_co_macro_plan_svg(rows, die, path):
@@ -767,12 +853,12 @@ def run_native_macro_flow(session, preflight):
                                   'target_core_utilization_percent':b['core_utilization'],
                                   'preview_hint_used_for_physical':False}
     plan,die=allocate_macro_rectangles(dims,co['packing_spacing'],mode=co['placement_mode'],
-        region_um=co['placement_region_um'],stayouts_um=co['placement_stayouts_um'],halo_um=co['halo_um'])
+        region_um=co['placement_region_um'],stayouts_um=co['placement_stayouts_um'],halo_um=co['halo_um'],grid_um=co['placement_grid_um'])
     for r in plan:
         r['min_spacing_um']=co['spacing']['min_um'];r['max_spacing_um']=co['spacing']['max_um']
-    die_metrics=autosized_macro_die(plan)
-    if [die_metrics['width_um'],die_metrics['height_um']] != die:
-        raise MacroConstraintError('CO.MACROS_DIE: placer and physical die dimensions disagree')
+    die_metrics=effective_macro_die(plan, mode=co['placement_mode'],
+        die_size_um=co['die_size_um'],halo_um=co['halo_um'])
+    die=[die_metrics['width_um'],die_metrics['height_um']]
     plan_preview=root/'co_macro_floorplan.svg'
     render_co_macro_plan_svg(plan,die,plan_preview)
     session.result.files['co_macro_floorplan']=str(plan_preview)
@@ -808,7 +894,8 @@ def run_native_macro_flow(session, preflight):
     _write_json(root/'co_macro_plan.json',{'status':'REQUESTED_NOT_YET_VERIFIED','blocks':plan,
                                          'top':co['top'],'spacing':co['spacing'],'packing_spacing':co['packing_spacing'],
                                          'pdn_placement_target_um':co['pdn_placement_target_um'],
-                                         'placement_mode':co['placement_mode'],
+                                         'placement_mode':co['placement_mode'],'placement_grid_um':co['placement_grid_um'],
+                                         'die_size_constraint_um':co['die_size_um'],
                                          'auto_die':die_metrics,'child_sizing':child_sizing,
                                          'placement_region_um':co['placement_region_um'],
                                          'pdn':{'top_hpitch_um':pdn_hpitch,'top_vpitch_um':pdn_vpitch,
@@ -824,12 +911,59 @@ def run_native_macro_flow(session, preflight):
     cmd+=['--pdk',physical['pdk'],'--run-tag',run_tag]
     if session.mode=='layout':cmd+=['--to','KLayout.StreamOut']
     cmd+=['config.json']
-    result=run_external(cmd,session.out,session.out,session.issues,session.events,
+    from .diagnostics import IssueCollector
+    # A failed *trial* must not permanently mark a recovered build FAILED.
+    # Only report a TOOL error if the final attempt also fails. All original
+    # attempts and their native logs remain in the machine-readable receipts.
+    result=run_external(cmd,session.out,session.out,IssueCollector(),session.events,
                         'physical',timeout=physical.get('timeout_s',14400),**opts)
+    attempts=[{'run_tag':run_tag,'status':result['status'],'log':result.get('log'),
+               'preferred_gap_um':co['packing_spacing']['preferred_um']}]
+    pdn_diagnostic=collect_pdn_errors(session.out/'physical.log') if result['status']!='PASS' else None
+    alternative=(alternate_pdn_floorplan(dims,co,plan) if
+                 result['status']=='FAIL' and pdn_diagnostic and
+                 pdn_diagnostic['status']=='PDN_CHANNEL_REPAIR_FAILED' else None)
+    if alternative:
+        retry_plan,retry_die,retry_gap=alternative
+        # A retry is a NEW LibreLane run with exact placement provenance;
+        # do not reuse or overwrite the first run's DEF/GDS/log.
+        retry_tag=run_tag+'_pdn1'
+        for row in retry_plan:
+            row['min_spacing_um']=co['spacing']['min_um']
+            row['max_spacing_um']=co['spacing']['max_um']
+            topcfg['MACROS'][row['module']]['instances'][row['instance']]['location']=[
+                row['x_um'],row['y_um']]
+        topcfg['DIE_AREA']=[0,0,*retry_die]
+        topcfg['CORE_AREA']=[10,10,retry_die[0]-10,retry_die[1]-10]
+        _write_json(session.out/'config.json',topcfg)
+        new_handoff=make_physical_handoff(root/'top.v',session.out/'config.json',
+            session.out/'physical_handoff.json',pdk=physical['pdk'],
+            run_tag=retry_tag,tool_path='WSL' if backend=='wsl' else 'native')
+        new_cmd=[retry_tag if i>0 and cmd[i-1]=='--run-tag' else part for i,part in enumerate(cmd)]
+        retry_result=run_external(new_cmd,session.out,session.out,IssueCollector(),session.events,
+                                  'physical_pdn_retry1',timeout=physical.get('timeout_s',14400),**opts)
+        attempts.append({'run_tag':retry_tag,'status':retry_result['status'],
+                         'log':retry_result.get('log'),'preferred_gap_um':retry_gap})
+        plan,die,run_tag,result,handoff=retry_plan,retry_die,retry_tag,retry_result,new_handoff
+        die_metrics=autosized_macro_die(plan)
+        render_co_macro_plan_svg(plan,die,plan_preview)
+        current_report=json.loads((root/'co_macro_plan.json').read_text(encoding='utf-8'))
+        current_report.update(blocks=plan,auto_die=die_metrics,
+                              packing_spacing={**co['packing_spacing'],'preferred_um':retry_gap},
+                              pdn_recovery_attempts=attempts)
+        _write_json(root/'co_macro_plan.json',current_report)
+        pdn_diagnostic=(collect_pdn_errors(session.out/'physical_pdn_retry1.log')
+                        if result['status']!='PASS' else None)
     if result['status']!='PASS':
-        pdn_diagnostic=collect_pdn_errors(session.out/'physical.log')
+        pdn_diagnostic=pdn_diagnostic or collect_pdn_errors(
+            session.out/'physical_pdn_retry1.log' if len(attempts)>1 else session.out/'physical.log')
+        pdn_diagnostic['attempts']=attempts
         _write_json(root/'pdn_diagnostics.json',pdn_diagnostic)
         session.result.files['macro_pdn_diagnostics']=str(root/'pdn_diagnostics.json')
+        if result.get('returncode'):
+            session.issues.add('TOOL.EXIT_NONZERO','ERROR','TOOL','physical',
+                f'External physical flow exited with code {result["returncode"]}.',
+                remedy='Inspect the final native physical log and PDN diagnostics.',evidence=result)
         issue=session.issues.add('CO.MACROS_TOP_FAILED','ERROR','PHYSICAL','physical',
             'Required modular top-level placement/routing failed.' +
             (' PDN-0179: power-grid channel repair failed; inspect co_macros/pdn_diagnostics.json and macro clearances.'
@@ -838,6 +972,8 @@ def run_native_macro_flow(session, preflight):
              if pdn_diagnostic['status']=='PDN_CONNECTIVITY_SUSPECT' else ''),
             evidence={**result,'pdn_diagnostics':pdn_diagnostic})
         session._done('physical',result['status'],issue_id=issue.issue_id,result=result);return
+    if len(attempts)>1:
+        session.events.emit('physical','pdn_recovery_succeeded',attempts=attempts)
     if not verify_handoff_inputs(handoff) or any(artifact_hash(Path(p))!=h for p,h in input_hashes.items()):
         raise MacroConstraintError('CO.MACROS_INPUTS_CHANGED: physical RTL/config changed while running')
     final=session.out/'runs'/run_tag

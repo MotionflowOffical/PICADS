@@ -26,7 +26,7 @@ try:
         QTreeWidget,QTreeWidgetItem,QTabWidget,QPlainTextEdit,QDockWidget,QLabel,QPushButton,QLineEdit,
         QGraphicsScene,QGraphicsView,QGraphicsRectItem,QGraphicsTextItem,QGraphicsLineItem,QGraphicsItem,
         QMessageBox,QFileDialog,QComboBox,QToolBar,QInputDialog,QTableWidget,QTableWidgetItem,QHeaderView,
-        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDialog,QDialogButtonBox,QProgressBar,QScrollArea,QSizePolicy)
+        QMenu,QCheckBox,QListWidget,QListWidgetItem,QStyle,QFormLayout,QSpinBox,QDoubleSpinBox,QDialog,QDialogButtonBox,QProgressBar,QScrollArea,QSizePolicy)
 except ImportError as exc:
     raise ImportError('The GUI requires PySide6. Install with: pip install "chipcompiler[gui]"') from exc
 
@@ -36,7 +36,7 @@ QMainWindow,QSplitter,QDockWidget { background:#0b131b; }
 QToolBar,QMenuBar,QStatusBar { background:#0d1923; border-bottom:1px solid #223543; }
 QPushButton { background:#193044; border:1px solid #31516a; border-radius:5px; padding:7px 12px; }
 QPushButton:hover {background:#22506d;} QPushButton:pressed{background:#13647f;}
-QLineEdit,QPlainTextEdit,QComboBox,QSpinBox { background:#0b141d; color:#dfebf1; border:1px solid #274052; border-radius:4px; padding:5px; }
+QLineEdit,QPlainTextEdit,QComboBox,QSpinBox,QDoubleSpinBox { background:#0b141d; color:#dfebf1; border:1px solid #274052; border-radius:4px; padding:5px; }
 QTabWidget::pane {border:1px solid #213949;} QTabBar::tab {background:#152533;padding:9px 15px;border:1px solid #243b4b;}
 QTabBar::tab:selected{background:#17384c;color:#7bdff0;border-bottom:2px solid #39b9da;}
 QTreeWidget,QTableWidget,QListWidget {background:#0e1821;alternate-background-color:#142431;border:1px solid #274052;}
@@ -225,22 +225,41 @@ class DraggableMacro(QGraphicsRectItem):
         self.setZValue(3)
         self.setPen(QPen(QColor('#62c3df'),2))
         self.setBrush(QBrush(QColor('#225c75')))
-        # Never scale text down with the full CO region or large macro dimensions.
-        # A child graphics item tracks the block while its text stays readable.
-        caption=QGraphicsTextItem(block['name']+'\n'+block['instance'],self)
-        caption.setDefaultTextColor(QColor('#ffffff'))
-        caption.setFont(QFont('Segoe UI',10,QFont.Weight.DemiBold))
-        caption.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,True)
-        caption.setZValue(10)
-        caption.setPos(5,5)
-        caption.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        # Names are painted on the macro itself. QGraphicsTextItem with
+        # ItemIgnoresTransformations was not reliable in the scaled/manual
+        # scene and sometimes appeared entirely blank. Paint within the
+        # rectangle so the label always follows drag and resize.
         self.setToolTip(f"{block['name']}  |  {block['instance']}  |  {block['size_um'][0]:g} × {block['size_um'][1]:g} µm")
         self.last_valid=None
 
+    def paint(self, painter, option, widget=None):
+        super().paint(painter, option, widget)
+        from .floorplan_labels import macro_label_layout
+        # The graphics view applies a uniform scene transform; calculate
+        # available physical pixels instead of assuming a fixed scene font.
+        transform=painter.worldTransform()
+        scale=max(0.001,(abs(transform.m11())+abs(transform.m22()))/2.0)
+        r=self.rect()
+        layout=macro_label_layout(self.block['name'], self.block['instance'],
+                                  r.width()*scale, r.height()*scale)
+        painter.save()
+        painter.setClipRect(r.adjusted(2,2,-2,-2))
+        painter.setPen(QColor('#f7fcff'))
+        font=QFont('Segoe UI')
+        font.setBold(True)
+        font.setPixelSize(max(1,round(layout['pixel_font_size']/scale)))
+        painter.setFont(font)
+        # Label always remains inside the block and is visibly centered.
+        painter.drawText(r.adjusted(3,3,-3,-3),
+                         Qt.AlignmentFlag.AlignCenter,
+                         layout['text'])
+        painter.restore()
+
     def itemChange(self, change, value):
-        if (change == QGraphicsRectItem.GraphicsItemChange.ItemPositionChange and
-                getattr(self, 'last_valid', None) is not None):
-            return self.editor.clamp_drag(self, value)
+        # Do NOT constrain mouse movement here. Restricting every intermediate
+        # position by the CO max-neighbor distance traps a block behind empty
+        # space and cannot traverse the temporary invalid gap to a legal home.
+        # CO clearance, hard stay-outs, region and die fit are checked on Save.
         return super().itemChange(change,value)
 
     def mouseReleaseEvent(self,event):
@@ -255,7 +274,7 @@ class MacroFloorplanEditor(QDialog):
     """
     def __init__(self,root,parent=None):
         super().__init__(parent)
-        from .co_macros import read_macro_constraints,allocate_macro_rectangles
+        from .co_macros import read_macro_constraints,allocate_macro_rectangles,autosized_macro_die
         import yaml
         self.root=Path(root).resolve()
         self.setWindowTitle('CO Physical Macro Placement — drag blocks / save architecture.co')
@@ -288,11 +307,13 @@ class MacroFloorplanEditor(QDialog):
                     self.unmeasured_auto_blocks.append(b['name'])
             self.blocks.append({**b,'size_um':size})
         self.sizes={b['instance']:b['size_um'] for b in self.blocks}
+        self.die_size_preference=self.spec['die_size_um']
+        self.preview_error=None
         if self.spec['placement_mode']=='manual':
             self.locations={b['instance']:list(b['location_um']) for b in self.blocks}
         else:
             rows,_=allocate_macro_rectangles(self.blocks,self.spec['packing_spacing'],mode=self.spec['placement_mode'],
-                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'],grid_um=self.spec['placement_grid_um'])
             self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
         zone=self.spec['placement_region_um']
         from .co_macro_editor import coordinates_from_blocks
@@ -320,6 +341,34 @@ class MacroFloorplanEditor(QDialog):
                             'Drag modules to edit the layout; red rectangles are mandatory stay-outs. '
                             'Origin is lower left; units are micrometres. Nominal sizes are used until hardened LEF exists.')
         self.summary.setWordWrap(True);body.addWidget(self.summary)
+        # Chip die is a separate manufactured boundary, not the CO workspace.
+        # Live resizing keeps the editor interactive; only Save requires a
+        # physically legal explicit die and legal placements.
+        die_controls=QHBoxLayout()
+        die_controls.addWidget(QLabel('Chip size:'))
+        self.die_mode_widget=QComboBox()
+        self.die_mode_widget.addItems(['Automatic — tightest placed bounds',
+                                       'Manual — specified die dimensions'])
+        is_manual=self.die_size_preference!='auto'
+        self.die_mode_widget.setCurrentIndex(1 if is_manual else 0)
+        die_controls.addWidget(self.die_mode_widget,1)
+        self.die_w_widget=QDoubleSpinBox()
+        self.die_h_widget=QDoubleSpinBox()
+        for w in (self.die_w_widget,self.die_h_widget):
+            w.setRange(25.,100000.)
+            w.setDecimals(2)
+            w.setSingleStep(10.)
+            w.setSuffix(' µm')
+        initial=([float(x) for x in self.die_size_preference] if is_manual else
+                 [float(x) for x in autosized_macro_die(starting)['die_area_um'][2:]])
+        self.die_w_widget.setValue(initial[0]);self.die_h_widget.setValue(initial[1])
+        self.die_w_widget.setEnabled(is_manual);self.die_h_widget.setEnabled(is_manual)
+        die_controls.addWidget(QLabel('W:'));die_controls.addWidget(self.die_w_widget)
+        die_controls.addWidget(QLabel('H:'));die_controls.addWidget(self.die_h_widget)
+        body.addLayout(die_controls)
+        self.die_mode_widget.currentIndexChanged.connect(self._die_control_changed)
+        self.die_w_widget.valueChanged.connect(self._die_control_changed)
+        self.die_h_widget.valueChanged.connect(self._die_control_changed)
         body.addWidget(self.view,1)
         self.status=QLabel('Changes remain in the editor until Save to CO. Physical GDS must be regenerated.')
         body.addWidget(self.status)
@@ -327,31 +376,85 @@ class MacroFloorplanEditor(QDialog):
         compact=QPushButton('Repack Compact');compact.clicked.connect(self.repack)
         fit_die=QPushButton('Fit Chip');fit_die.clicked.connect(self.fit_die)
         fit_region=QPushButton('Fit CO Region');fit_region.clicked.connect(self.fit_region)
-        save=QPushButton('Save Positions to CO');save.clicked.connect(self.save)
+        save=QPushButton('Save Manual Layout');save.clicked.connect(self.save)
+        save_auto=QPushButton('Save Automatic Layout');save_auto.clicked.connect(self.save_automatic)
+        save_auto.setToolTip('Discard manual coordinates; save compact automatic placement with the smallest candidate die')
         cancel=QPushButton('Cancel');cancel.clicked.connect(self.reject)
-        for b in (compact,fit_die,fit_region,save,cancel):row.addWidget(b)
+        for b in (compact,fit_die,fit_region,save,save_auto,cancel):row.addWidget(b)
         body.addLayout(row)
         self._paint()
 
-    def _paint(self):
-        from .co_macros import autosized_macro_die
+    def _die_control_changed(self, *_):
+        manual=self.die_mode_widget.currentIndex()==1
+        self.die_w_widget.setEnabled(manual)
+        self.die_h_widget.setEnabled(manual)
+        self.die_size_preference=([self.die_w_widget.value(),self.die_h_widget.value()]
+                                  if manual else 'auto')
+        self._paint(keep_view=True)
+
+    def _geometry_error(self):
         from .co_macro_editor import coordinates_from_blocks
-        rows=coordinates_from_blocks(self.blocks,self.locations,
-            min_coord=0 if self.spec['placement_region_um'] else 30)
+        from .co_macros import (_validate_2d_clearance,check_macro_placement_zones,
+                                effective_macro_die,MacroConstraintError)
+        try:
+            rows=coordinates_from_blocks(self.blocks,self.locations,
+                min_coord=0 if self.spec['placement_region_um'] else 30)
+            _validate_2d_clearance(rows,self.spec['spacing'])
+            check_macro_placement_zones(rows,region_um=self.spec['placement_region_um'],
+                stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+            effective_macro_die(rows,mode='manual',die_size_um=self.die_size_preference,
+                                halo_um=self.spec['halo_um'])
+        except MacroConstraintError as exc:
+            return str(exc)
+        return None
+
+    def _paint(self, keep_view=False):
+        from .co_macros import autosized_macro_die,effective_macro_die,MacroConstraintError
+        from .co_macro_editor import coordinates_from_blocks
+        # Preview must remain drawable even when a dragged block is temporarily
+        # outside the allowed region (or negative). Save is the strict gate.
+        rows=[{'name':b['name'],'module':b['module'],'instance':b['instance'],
+               'x_um':self.locations[b['instance']][0],
+               'y_um':self.locations[b['instance']][1],
+               'width_um':b['size_um'][0],'height_um':b['size_um'][1]}
+              for b in self.blocks]
         metrics=autosized_macro_die(rows)
+        try:
+            metrics=effective_macro_die(rows,mode='manual',die_size_um=self.die_size_preference,
+                                        halo_um=self.spec['halo_um'])
+            die_error=None
+        except MacroConstraintError as exc:
+            die_error=str(exc)
+            # Keep showing the user-entered die even if it is too small;
+            # painting must not crash and Save must not silently enlarge it.
+            w,h=self.die_size_preference
+            metrics={**metrics,'width_um':w,'height_um':h,
+                     'sizing_basis':'manual_invalid_preview'}
         self.die_metrics=metrics
         die_w,die_h=metrics['width_um'],metrics['height_um']
+        self.preview_error=self._geometry_error()
+        previous_view_center=(self.view.mapToScene(self.view.viewport().rect().center())
+                              if keep_view else None)
+        previous_transform=(self.view.transform() if keep_view else None)
+        # Auto-fit the chip only on first opening / explicit Fit Chip;
+        # preserve user zoom and pan after moving or editing a dimension.
+        self.canvas_w=max(self.canvas_w,die_w+30,
+                          max(r['x_um']+r['width_um'] for r in rows)+60)
+        self.canvas_h=max(self.canvas_h,die_h+30,
+                          max(r['y_um']+r['height_um'] for r in rows)+60)
         sizing_status=('PREVIEW ESTIMATE — auto macros need hardening to measure LEF: '+
                        ', '.join(self.unmeasured_auto_blocks)+'. ' if self.unmeasured_auto_blocks
                        else 'Macro geometry from hardened LEF or fixed CO dimensions. ')
         self.summary.setText(
-            f"{'Estimated' if self.unmeasured_auto_blocks else 'Auto-sized'} die: "
+            f"{'Manual' if self.die_size_preference!='auto' else 'Estimated' if self.unmeasured_auto_blocks else 'Auto-sized'} die: "
             f"{die_w:g} × {die_h:g} µm | "
             f"macro footprint: {metrics['macro_coverage_percent']:.1f}% | "
             +sizing_status+
             'This percentage counts macro rectangles, NOT actual cell utilization. '
             'Cyan = CO allowed region (not die size); red = prohibited stay-outs. '
-            'Placement is unverified until routed.')
+            'Drag freely across temporarily invalid positions; Save enforces all CO rules. '
+            + ('INVALID — '+self.preview_error if self.preview_error else
+               'Placement is unverified until routed.'))
         self.scene.clear();self.items={}
         sc=self.scale_factor;w=self.canvas_w*sc;h=self.canvas_h*sc
         self.scene.addRect(0,0,w,h,QPen(QColor('#607a8a'),1),QBrush(QColor('#122530')))
@@ -367,7 +470,7 @@ class MacroFloorplanEditor(QDialog):
         self.scene.addRect(x0*sc,(self.canvas_h-y1)*sc,(x1-x0)*sc,(y1-y0)*sc,
                            region_pen,QBrush(QColor('#0e3033'))).setZValue(-2)
         die_rect=QRectF(0,(self.canvas_h-die_h)*sc,die_w*sc,die_h*sc)
-        self.scene.addRect(die_rect,QPen(QColor('#e6d38b'),2),
+        self.scene.addRect(die_rect,QPen(QColor('#ff7878') if die_error else QColor('#e6d38b'),2),
                            QBrush(QColor('#1d3440'))).setZValue(-1.5)
         for i,(sx,sy,ex,ey) in enumerate(self.spec['placement_stayouts_um']):
             pad=self.spec['halo_um']
@@ -380,9 +483,23 @@ class MacroFloorplanEditor(QDialog):
             xy=self.locations[b['instance']];item.setPos(xy[0]*sc,(self.canvas_h-xy[1]-b['size_um'][1])*sc)
             item.last_valid=item.pos()
             self.scene.addItem(item);self.items[b['instance']]=item
+            # The pale outline is the non-negotiable macro halo. Additional
+            # maximum-neighbor spacing is a Save rule, not an invisible wall.
+            pad=self.spec['halo_um']
+            halo_box=QGraphicsRectItem(-pad*sc,-pad*sc,
+                (b['size_um'][0]+2*pad)*sc,(b['size_um'][1]+2*pad)*sc,item)
+            halo_box.setPen(QPen(QColor('#9f9d78'),1,Qt.PenStyle.DotLine))
+            halo_box.setBrush(Qt.BrushStyle.NoBrush)
+            halo_box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            halo_box.setZValue(-1)
         self.scene.setSceneRect(-15,-15,w+30,h+30)
         self._die_view_rect=die_rect.adjusted(-15,-15,15,15)
-        self.view.fit_rect(self._die_view_rect)
+        if keep_view:
+            self.view.fit_target=None
+            self.view.setTransform(previous_transform)
+            self.view.centerOn(previous_view_center)
+        else:
+            self.view.fit_rect(self._die_view_rect)
 
     def fit_die(self):
         self.view.fit_rect(self._die_view_rect)
@@ -416,58 +533,52 @@ class MacroFloorplanEditor(QDialog):
         except MacroConstraintError:
             return False
 
-    def clamp_drag(self,item,requested):
-        """Physically prevent invalid motion, not merely reject at mouse release."""
-        w,h=item.block['size_um'];x0,y0,x1,y1=self.allowed_zone
-        px,py=self._scene_position_to_um(item,requested)
-        x=min(max(px,x0),x1-w);y=min(max(py,y0),y1-h)
-        if self._valid_drag(item,x,y):
-            item.last_valid=self._um_to_scene_position(item,x,y)
-            return item.last_valid
-        # Slide along an obstacle when one axis can move independently.
-        ox,oy=self._scene_position_to_um(item,item.last_valid)
-        for nx,ny in ((x,oy),(ox,y)):
-            if self._valid_drag(item,nx,ny):
-                item.last_valid=self._um_to_scene_position(item,nx,ny)
-                return item.last_valid
-        # If both axes are blocked, stop at the boundary rather than jumping
-        # back to the position at the beginning of the drag operation.
-        lo,hi=0.,1.
-        for _ in range(15):
-            t=(lo+hi)*0.5
-            nx=ox+(x-ox)*t;ny=oy+(y-oy)*t
-            if self._valid_drag(item,nx,ny):lo=t
-            else:hi=t
-        item.last_valid=self._um_to_scene_position(item,ox+(x-ox)*lo,oy+(y-oy)*lo)
-        return item.last_valid
-
     def validate_movement(self,item):
+        # Never clamp cursor motion during a drag: intermediate placements can
+        # be outside CO constraints, but cannot be committed by Save.
         x,y=self._scene_position_to_um(item,item.pos())
-        if not self._valid_drag(item,x,y):
-            item.setPos(item.last_valid)
-            self.status.setText('Blocked by CO placement boundary, stay-out or module clearance.')
-            return
         self.locations[item.block['instance']]=[x,y]
         item.last_valid=item.pos()
-        self.status.setText(f'{item.block["instance"]}: ({x:g}, {y:g}) µm — inside CO allowed zone; not saved')
-        # Recompute the die from the moved blocks after mouse events complete.
-        QTimer.singleShot(0,self._paint)
+        error=self._geometry_error()
+        if error:
+            self.status.setText(f'{item.block["instance"]}: ({x:g}, {y:g}) µm — not saveable: {error}')
+        else:
+            self.status.setText(f'{item.block["instance"]}: ({x:g}, {y:g}) µm — valid preview; not saved')
+        # After mouse events, repaint bounds/halos without resetting zoom.
+        QTimer.singleShot(0,lambda:self._paint(keep_view=True))
 
     def repack(self):
         from .co_macros import allocate_macro_rectangles,MacroConstraintError
         try:
             rows,_=allocate_macro_rectangles(self.blocks,self.spec['packing_spacing'],mode='compact',
-                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'])
+                region_um=self.spec['placement_region_um'],stayouts_um=self.spec['placement_stayouts_um'],halo_um=self.spec['halo_um'],grid_um=self.spec['placement_grid_um'])
             self.locations={r['instance']:[r['x_um'],r['y_um']] for r in rows}
-            self._paint()
+            self._paint(keep_view=True)
             self.status.setText('Repacked compactly. Save to CO to commit, or Cancel to discard.')
         except MacroConstraintError as exc:
             self.status.setText('Automatic packing failed: '+str(exc))
 
+    def save_automatic(self):
+        from .co_macro_editor import save_automatic_macro_placement
+        reply=QMessageBox.question(self,'Use automatic floorplanning?',
+            'Replace manual macro coordinates with automatic compact placement? '
+            'The chip size will be calculated from the resulting macro geometry. '
+            'A backup of architecture.co will be saved.')
+        if reply!=QMessageBox.StandardButton.Yes:
+            return
+        try:
+            result=save_automatic_macro_placement(self.root,measured_sizes=self.sizes)
+        except Exception as exc:
+            QMessageBox.warning(self,'Cannot save automatic placement',str(exc))
+            return
+        self.status.setText(result['status'])
+        self.accept()
+
     def save(self):
         from .co_macro_editor import save_macro_locations
         try:
-            result=save_macro_locations(self.root,self.locations,measured_sizes=self.sizes)
+            result=save_macro_locations(self.root,self.locations,measured_sizes=self.sizes,
+                                        die_size_um=self.die_size_preference)
         except Exception as exc:
             QMessageBox.warning(self,'Cannot save physical constraints',str(exc))
             return

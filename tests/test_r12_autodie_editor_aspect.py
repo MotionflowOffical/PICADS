@@ -72,10 +72,12 @@ def test_gui_floorplan_labels_and_preview_keep_aspect(tmp_path,monkeypatch):
     class Editor:pass
     b={'name':'ProcessorControl','instance':'u_control','size_um':[250,200]}
     block=DraggableMacro(Editor(),b,1)
-    from PySide6.QtWidgets import QGraphicsItem,QGraphicsTextItem
-    labels=[x for x in block.childItems() if isinstance(x,QGraphicsTextItem)]
-    assert labels and 'ProcessorControl' in labels[0].toPlainText()
-    assert labels[0].flags() & QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
+    from chipcompiler.floorplan_labels import macro_label_layout
+    import inspect
+    # Rendering now happens in the block paint() itself; a child label with
+    # ItemIgnoresTransformations was invisible in some manual placements.
+    assert 'painter.drawText' in inspect.getsource(DraggableMacro.paint)
+    assert 'Processor' in macro_label_layout('ProcessorControl','u_control',250,200)['text']
     w.close();view.close()
 
 
