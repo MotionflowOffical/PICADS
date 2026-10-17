@@ -7,6 +7,7 @@ from __future__ import annotations
 from pathlib import Path
 import json,subprocess,shutil,zipfile,difflib,traceback,re,datetime
 from .pipeline import BuildSession
+from .legal import ORIGINAL_CREATOR, PROJECT_NAME, LICENSE_NAME
 from .project import open_project,atomic_write,snapshot,restore
 from .diagnostics import IssueCollector
 from .ir import DLS
@@ -932,6 +933,20 @@ class Window(QMainWindow):
         view=m.addMenu('View')
         for idx,text in enumerate(['Code + Logic Graph','Architecture / Dependencies','Simulate / Debug','Physical / Masks','Build / Export','History / Recovery','Settings','Concurrent Fabric']):
             self.action(text,lambda checked=False,i=idx:self.tabs.setCurrentIndex(i),view)
+        help_menu=m.addMenu('Help')
+        self.action('About PICADS', self._about_picads, help_menu)
+
+    def _about_picads(self):
+        QMessageBox.about(
+            self,
+            'About PICADS',
+            '<h3>PICADS — Procedural Integrated Circuit Architecture and Design System</h3>'
+            '<p><b>Original and principal creator:</b> ' + ORIGINAL_CREATOR + '</p>'
+            '<p><b>Work in progress:</b> experimental EDA, not fabrication-qualified.</p>'
+            '<p>' + LICENSE_NAME + '.</p>'
+            '<p>See LICENSE, NOTICE, README.md and docs/KNOWN_ISSUES_AND_LIMITATIONS.md '
+            'in the PICADS source distribution.</p>'
+        )
 
     def populate_tree(self):
         self.project_tree.clear();rootitem=QTreeWidgetItem([self.root.name]);rootitem.setData(0,Qt.ItemDataRole.UserRole,str(self.root));self.project_tree.addTopLevelItem(rootitem)

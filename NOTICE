@@ -1,0 +1,47 @@
+PICADS — Procedural Integrated Circuit Architecture and Design System
+Original and principal creator: MotionflowOffical
+Official PICADS source code: https://github.com/MotionflowOffical/PICADS
+Original creator profile: https://github.com/MotionflowOffical
+
+Copyright (c) 2026 MotionflowOffical for original material authored and owned
+by that creator. Other contributors retain their own copyright.
+
+License: PICADS License (see LICENSE).
+
+Commercial engineering and sale of independently created chips, layouts and
+other deliverables are permitted with the required PICADS creator credit and
+official-source link. Private modifications need not be made public merely
+because they are used internally to create those deliverables.
+
+Standalone PICADS software, forks or essentially identical paid hosted access
+may NOT be sold, resold or paywalled without explicit written permission from
+the actual rightsholders. A paid product with genuinely independent features
+may include a PICADS component ONLY under the Section 3 Paid Integration
+Exception. It must provide all parties free, ungated public access to the
+exact corresponding PICADS component source, including every modification,
+and retain this license, PICADS name, notices, and credits. A link to the
+original repository is necessary for creator attribution but is NOT a
+substitute for a free copy of the actual modified source.
+
+Required commercial attribution:
+"Made using PICADS — Procedural Integrated Circuit Architecture and Design
+System. Original and principal creator: MotionflowOffical.
+Official PICADS source code: https://github.com/MotionflowOffical/PICADS"
+
+Internal commercial attribution may be recorded once per applicable project
+or toolchain and retained for at least three years after last commercial use.
+
+New contributions accepted into official PICADS require an executed CLA;
+retained contributor copyright does not by itself give the original author
+a right to sublicense unlicensed contributions. See CONTRIBUTING.md and
+docs/CONTRIBUTOR_AGREEMENT.md. Publicly available free PICADS code retains
+its existing free-use rights. Separately prepared author-controlled editions
+not previously made publicly available free may be offered under different
+terms, subject to rights in the included material.
+
+WORK IN PROGRESS — EXPERIMENTAL EDA. NOT FABRICATION-QUALIFIED.
+See docs/KNOWN_ISSUES_AND_LIMITATIONS.md for current limitations and tests.
+
+Third-party software, libraries, EDA tools, PDKs, and assets remain governed
+by their applicable owners' independent terms. PICADS grants no additional
+rights in independently owned materials.

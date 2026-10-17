@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse,json,sys,os,shutil
 from pathlib import Path
 from . import __version__
+from .legal import LEGAL_ABOUT_TEXT
 from .pipeline import BuildSession
 from .tools import probe
 from .dependencies import register_tool, unregister_tool, tool_status, probe_tools, settings_file, auto_detect_all
@@ -30,6 +31,8 @@ def init_project(path:Path):
 def main(argv=None)->int:
     ap=argparse.ArgumentParser(prog='picads',description='PICADS procedural integrated circuit design and automation')
     ap.add_argument('--version',action='version',version=__version__)
+    ap.add_argument('--about', action='version', version=LEGAL_ABOUT_TEXT,
+                    help='Show PICADS original creator, license and WIP status')
     commands=ap.add_subparsers(dest='command',required=True)
     for c in ('compile','build','physical','layout','verify_layout','doctor','gui','init','backup','restore','simulate','trace','diagnose','inspect-mask','render-mask','physical-preflight','configure-physical'):
         sp=commands.add_parser(c)

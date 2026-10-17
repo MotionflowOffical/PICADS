@@ -1,0 +1,367 @@
+PICADS LICENSE
+
+PICADS — Procedural Integrated Circuit Architecture and Design System
+Original and principal creator: MotionflowOffical
+Official source code: https://github.com/MotionflowOffical/PICADS
+
+Copyright (c) 2026 MotionflowOffical for original material actually owned by
+that author. Other authors retain copyright in their respective contributions.
+
+This License permits private and commercial use of PICADS, including commercial
+sale of independently produced chips and designs, subject to the mandatory
+PICADS attribution in Section 7. It permits no-charge sharing of PICADS code
+with matching source. Standalone sale, resale, or paywalling of PICADS code or
+software access is prohibited without the actual copyright holder's written
+permission. A genuinely broader paid product may include PICADS if it meets
+ALL conditions of the Paid Integration Exception in Section 3, including free,
+independent public access to the exact corresponding PICADS source. Private
+modifications used solely in an internal engineering workflow need not be
+published. The requirements of this License apply only to rights that the
+relevant licensor actually controls.
+
+1. DEFINITIONS
+
+"PICADS" means the original program and materials lawfully offered under this
+License by the rights holder(s). A "Covered Work" means PICADS software,
+software copying copyright-protected PICADS material, and modifications or
+copyright derivatives of that software, but only to the extent the applicable
+rights holder is legally able to license the material. Calling something a
+fork, plugin, wrapper, adaptation or differently branded application does not
+by itself change whether PICADS code has been copied or modified.
+
+A "PICADS Component" is the portion of a combined product or service that is a
+Covered Work, together with modifications and components necessary to build,
+run and modify that portion. An independent application that merely invokes
+PICADS through a documented process, command-line or network interface does
+not automatically become a Covered Work merely by interacting with it. A
+substantive change to PICADS itself remains a Covered Work even if embedded in
+an otherwise independent application.
+
+"Corresponding Source" is the complete, preferred, human-readable source for
+the exact PICADS Component released or deployed, including all modifications,
+patches, relevant interfaces/adapters that are themselves Covered Works,
+generation inputs, build and installation scripts, configurations and clear
+instructions to reproduce that PICADS Component. It excludes independently
+created, separable host-application code not containing PICADS-protected
+material, generally available tools and independent third-party libraries;
+the latter must be identified so the component can be built using lawfully
+available equivalents. Source which requires a paid proprietary host, key or
+secret just to build or run the PICADS Component on its own does not satisfy
+this definition unless a complete publicly usable replacement for that
+requirement is included. Removing confidential credentials from examples is
+allowed; concealing functional PICADS modifications is not.
+
+"Distribution" means providing the Covered Work or copies of its source or
+binaries to someone else, including through download, shipment, publishing,
+resale or bundling. "Network Deployment" means allowing third parties to
+operate or invoke functions of a PICADS Component over a network, even if no
+copy is transferred. A contractor operating the software only within a
+customer's confidential project and delivering independent results is not,
+solely for that reason, providing the customer with Network Deployment.
+
+"Commercial Use" means professional, business, research-for-profit or other
+revenue-related use of PICADS, including privately modified copies, that does
+not necessarily involve Distribution or Network Deployment. "Independent
+Outputs" means chips, GDS/layout files, designs, masks, engineering reports,
+and other independently usable outputs produced using PICADS. Outputs do not
+become Covered Works solely because PICADS helped create them, but embedded
+copies of PICADS source remain Covered Works.
+
+A "Paid Integration" is Distribution of or Network Deployment involving a
+PICADS Component within a broader, paid product or hosted application that
+also provides material independently implemented functionality. "Standalone
+PICADS Monetization" means charging for PICADS code, copies or access as the
+primary or materially equivalent offering, including cosmetic repackaging,
+resale, a minimally altered fork, or a thin paywalled wrapper whose primary
+function is to provide PICADS functionality. Payment to a different company
+or intermediary, a new name, UI restyling, hosting, or a token extra feature
+does not turn Standalone PICADS Monetization into a Paid Integration.
+
+"Previously Free Public Edition" means PICADS code or an edition of PICADS
+that was in fact made available to the public without charge and with the
+applicable source access. Availability is determined by the code actually
+published, not by a version number, marketing name, repository ownership,
+announced future availability, or a claim that a copy is a new edition.
+An "Author-Unpublished Edition" means a distinct edition prepared or
+expressly authorized by the actual PICADS Author that has not previously
+been made publicly available for free in that edition. A third party cannot
+create an Author-Unpublished Edition by renaming, packaging, modifying,
+or republishing freely available PICADS code; actual authorship and rights
+control, not attribution text, determine who may separately license it.
+
+"PICADS Author" means the actual copyright owner of the original PICADS code
+publicly credited as MotionflowOffical, not anyone who merely claims that
+account name or prints the creator credit. "Official Source Repository" is
+https://github.com/MotionflowOffical/PICADS. Links to forks, mirrors,
+profiles or shortened URLs do not replace that original-credit link.
+
+2. USE, PRIVATE MODIFICATIONS, INDEPENDENT OUTPUTS AND FREE SHARING
+
+Subject to this License and any independent third-party rights, an authorized
+recipient may use, study, copy, run, and modify PICADS privately, including
+in commercial engineering and to produce and sell Independent Outputs. No
+PICADS software royalty is charged merely for selling chips or other
+Independent Outputs, but commercial attribution under Section 7 is required.
+Private PICADS modifications need not be disclosed merely because they were
+used to generate commercially sold outputs. This permission does not include
+selling access to the PICADS software itself.
+
+A recipient may distribute Covered Works at no charge if they concurrently
+make exact Corresponding Source freely available under this License and
+comply with the license, notice, naming, change-identification and WIP rules.
+Distribution or deployment inside a genuinely broader paid application is
+additionally possible ONLY under the Section 3 Paid Integration Exception.
+
+3. STANDALONE RESELLING PROHIBITED; PAID INTEGRATION EXCEPTION
+
+3.1. Except where the PICADS Author and all other necessary rights holders
+have granted an explicit, verifiable written exception under Section 4, no
+recipient may engage in Standalone PICADS Monetization. In particular, no
+recipient may sell copies of PICADS, sell PICADS source, charge to download,
+install, activate or use PICADS as a standalone program, resell an ordinary
+fork, paywall the exact PICADS software, or sell a hosted instance of PICADS
+with no independently substantial broader product. A charge renamed a
+"donation," "support fee," "access fee," "consulting subscription," or
+"deployment fee" does not evade this rule when access to PICADS itself is
+conditional on payment.
+
+3.2. A third party MAY include a PICADS Component within a paid desktop
+application, EDA suite, device package, engineering platform, or hosted
+product, without a special paid-distribution grant, ONLY when ALL conditions
+below are met:
+
+(a) The broader offering has material, genuinely independent functionality
+    separate from PICADS. Rebranding, trivial UI layers, installation scripts,
+    minor format conversion, a launcher, an access gateway, or token add-ons
+    do not alone qualify. It must be useful for substantive reasons other
+    than obtaining a paid copy of, or remote access to, PICADS.
+
+(b) The exact Corresponding Source for the PICADS Component actually shipped
+    or deployed, including every change made to PICADS, is published at a
+    conspicuous, stable HTTPS download URL accessible to ALL persons at no
+    charge, without purchase, subscription, payment details, paid account,
+    mandatory registration, or special permission. It must be available no
+    later than the start of paid distribution/deployment and remain freely
+    available while that version is offered or supported AND for at least
+    three years after the last paid distribution or deployment of that
+    version. A change of owner, reseller, service provider or domain does
+    not shorten that obligation. Users must be able to retain and build the
+    downloaded PICADS source independently of the paid host application.
+
+(c) The paid offering and every relevant download, About/credits or
+    documentation entry must clearly identify the PICADS Component, provide
+    the free exact-version source URL, include the official PICADS origin URL
+    and original creator credit, and disclose changes to PICADS. A generic
+    link to the original unmodified project does NOT replace the exact
+    modified source URL. The host application may have its own primary name,
+    but the embedded PICADS Component must be clearly identified as PICADS.
+
+(d) The PICADS Component and exact Corresponding Source must remain under
+    this License and remain freely shareable under Section 2. No EULA,
+    DRM, activation scheme, contract, license key, conflicting IP term,
+    technical measure or third-party agreement may remove those rights or
+    require paid access to the PICADS Component as separately buildable code.
+    Terms for genuinely independent host-application code may differ.
+
+(e) The inclusion must not falsely imply authorization or endorsement by the
+    PICADS Author; no distributor obtains the author's exclusive rights or
+    a standalone PICADS resale license merely by complying with this
+    exception. Contractors, vendors and downstream redistributors must
+    preserve these same conditions for every copy they provide.
+
+3.3. Examples (these illustrate the conditions; labels cannot override them):
+
+    PERMITTED: A paid CAD suite provides original schematic, analysis and
+    collaboration features plus a PICADS backend, and publishes the exact
+    modified PICADS backend source freely under Sections 3.2 and 5.
+
+    PERMITTED: A paid hosted design platform provides independently valuable
+    design-management and analysis tools and embeds PICADS execution, while
+    offering the deployed PICADS Component's exact source freely and meeting
+    Sections 3.2 and 5. Private designs and separable host code stay private.
+
+    PERMITTED: An engineering consultancy uses a privately modified PICADS
+    installation internally to deliver chips, files or reports. Customers
+    receive only Independent Outputs, not access to PICADS software. There
+    is no source-publication trigger solely for this internal use; Section 7
+    attribution still applies.
+
+    PROHIBITED: An identical PICADS download sold for money or a PICADS API
+    placed behind a paywall, even if an unchanged upstream source URL is
+    displayed. A renamed PICADS with a new launcher, cosmetics or a token
+    feature remains prohibited Standalone PICADS Monetization.
+
+3.4. Source publication under this exception is not permission to charge
+separately for PICADS. If the PICADS Component is independently distributed,
+that distribution must comply with Section 2. Where it is not clear whether
+a paid product has substantial independent functionality, the recipient
+must obtain Section 4 permission before relying on the Paid Integration
+Exception; a mere claim of integration does not satisfy Section 3.2.
+
+4. RIGHTS-HOLDER AUTHORIZATION, ORIGINAL AUTHOR AND CONTRIBUTIONS
+
+Only the actual rightsholder can grant exceptions for rights they own or
+control. Written commercial permissions outside Section 3.2 must identify
+the granting actual owner, recipient, versions/code, permitted conduct, term
+and any separately necessary contributors' permissions. Merely putting the
+project in MotionflowOffical's name, using the PICADS brand, being a
+contributor or preserving credit does not make a fork the original author's
+release and does not grant Standalone PICADS Monetization rights.
+
+A Previously Free Public Edition remains available under the free permissions
+that applied when its code was made publicly available. Recipients may
+continue to use, study, modify and redistribute that edition without charge
+subject to this License; a later decision by the PICADS Author to offer a
+separate paid edition does not withdraw or convert those existing rights.
+The creator is not required by this paragraph to maintain a particular
+website forever; a discontinued download does not terminate rights already
+granted to lawful recipients.
+
+The actual PICADS Author may separately offer an Author-Unpublished Edition
+under different terms, including paid terms, only to the extent the author
+owns or holds the required permission for its contents. That permission
+concerns the distinct author-controlled edition, not copies of previously
+free public code already licensed to recipients. An edition cannot be
+reclassified as never-public solely by changing its name, wrapper, build
+number, hosting location or method of distribution. Attribution to the
+original creator does not make a third-party fork an author-owned edition.
+
+Contributors retain their copyrights unless separately transferred. The
+PICADS Author cannot issue additional commercial licenses for someone
+else's independent contribution without sufficient rights. Contributions
+accepted into the official PICADS project are subject to the separately signed
+Contributor License Agreement (CLA) policy described in CONTRIBUTING.md and
+`docs/CONTRIBUTOR_AGREEMENT.md`, granting the PICADS Author a nonexclusive
+right to relicense those accepted contributions, including for distinct
+author-controlled editions not previously made publicly available for free.
+A proposed or unsigned CLA grants no rights; third-party
+fork contributions do not become covered by an official-project CLA merely
+because they exist. Contributors are responsible for authorized third-party
+content and employer permissions. Existing external contributions and
+dependencies require independent rights review.
+
+5. EXACT SOURCE DISCLOSURE; NETWORK DEPLOYMENT; PRIVATE WORK
+
+For every no-charge Distribution and every Paid Integration under Section 3.2,
+the PICADS Component's actual Corresponding Source must be available to all
+recipients, with the exact version/commit identifier, build instructions and
+complete modifications. A clear download on the relevant distribution page
+or documentation is acceptable if not gated by payment or registration.
+For qualifying Network Deployment of a modified Covered Work to outsiders,
+including a freely accessible PICADS web application or a permitted paid
+integration, its operator must provide the same source access while the
+service is provided. Section 3.2 sets the additional retention period for
+paid integrations.
+
+Use of PICADS inside an organization or by a contractor solely to deliver
+Independent Outputs does not trigger release of private modifications, even
+if the work is paid. Neither the code of a genuinely independent paid host
+application nor private chip designs, netlists, customer files, internal
+workflows, secrets and independent reports become mandatory public source
+merely because they interface with PICADS. Copying PICADS-owned code into a
+nominally independent module does not create such an exemption. The Official
+Source Repository link is for origin attribution and NEVER replaces the
+matching modified-source download required when source disclosure applies.
+
+6. PERMANENT PROJECT NAME, AUTHORSHIP AND MODIFICATION NOTICE
+
+Distributed Covered Works must retain PICADS as the name of the Covered Work
+and the PICADS Component (including within any paid host). Forks may add a
+qualifier such as "PICADS — Community Fork" but must not erase the original
+name. Paid host applications may retain their own independent product names
+if the PICADS Component is clearly identified within them. Every distribution
+must prominently preserve this notice in its README/NOTICE and About or
+credits (or CLI --about/help for CLI-only software):
+
+  PICADS — Procedural Integrated Circuit Architecture and Design System.
+  Original and principal creator: MotionflowOffical.
+  Official PICADS source code: https://github.com/MotionflowOffical/PICADS
+
+Clearly credit additional authors of their own changes, identify the fork or
+integration maintainer, provide a meaningful change notice and avoid any
+false claim of original authorship or official endorsement. An attribution
+notice grants no exceptions to Section 3.
+
+7. MANDATORY COMMERCIAL ATTRIBUTION AND SUFFICIENT INTERNAL RECORDS
+
+Every Commercial Use, including commercial use of privately modified copies,
+requires this original-creator attribution and link to the official source:
+
+  Made using PICADS — Procedural Integrated Circuit Architecture and Design
+  System. Original and principal creator: MotionflowOffical.
+  Official PICADS source code: https://github.com/MotionflowOffical/PICADS
+
+Publicly marketed products or customer-facing Independent Outputs must show
+this notice in relevant product documentation, user guide, project report,
+client handoff or product listing, associated with the actual product; a
+physical chip need not be marked. Digital links must be directly clickable;
+printed URLs must be legible. Confidential client work may carry the notice
+privately in delivered documentation without publishing customer designs.
+A fork URL, generic logo, buried unrelated legal page or merely the
+original author's profile is not a substitute.
+
+For exclusively internal Commercial Use with no external deliverable, one
+accessible, durable record per applicable project, product family or toolchain
+is sufficient; a separate notice for every run, generated file or chip is NOT
+required. An internal project README, design-system inventory, compliance
+record, build manifest or engineering wiki page qualifies if it contains the
+complete notice above, identifies which project/toolchain uses PICADS, and
+records the PICADS version or commit when known. An organization using
+contractors, subsidiaries or automated build systems may centralize this
+record, provided the relevant teams can locate it. Retain the internal record
+while the use continues and for at least three years after the last
+Commercial Use of the associated project or toolchain. If records are
+reasonably requested to resolve a specific attribution dispute, confirmation
+may be limited to the relevant notice and version without disclosing customer
+secrets or other proprietary files, subject to applicable law. There is no
+general audit or unrestricted access right created by this clause.
+
+Every entity that uses PICADS commercially is responsible for its own
+applicable notice, but may satisfy the requirement through an accessible
+shared project record or correctly attributed client deliverable when that
+record covers its role. Neither subcontracting nor white-labeling is an
+excuse to remove author credit. Attribution alone never grants rights to
+sell or paywall the PICADS Component. Attribution alone never triggers
+publication of privately modified code.
+
+8. THIRD-PARTY RIGHTS; WIP WARNINGS
+
+No PICADS copyright permission covers unrelated tools, process-design
+kits, cells, models, dependencies, libraries, data or code of third parties
+without their permission. Distributors must comply with independent licenses
+on such material. Preserve LICENSE, NOTICE and a clear WIP warning, including
+references to docs/KNOWN_ISSUES_AND_LIMITATIONS.md or an equally accessible
+version of the project's then-current known limitations. PICADS is
+experimental; a generated GDS does not establish manufacturing signoff.
+
+9. NO WARRANTY AND LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW PICADS IS PROVIDED "AS IS"
+WITHOUT WARRANTIES OF MERCHANTABILITY, FITNESS, NON-INFRINGEMENT,
+FUNCTIONAL CORRECTNESS, FABRICATION SUITABILITY OR SAFETY. DRC/LVS, TIMING,
+POWER, FUNCTIONAL EQUIVALENCE, ELECTRICAL BEHAVIOR AND MANUFACTURABILITY
+REQUIRE INDEPENDENT VALIDATION. TO THE EXTENT LEGALLY PERMISSIBLE, AUTHORS
+AND RIGHTS HOLDERS ARE NOT LIABLE FOR LOSSES ARISING FROM USE OR FABRICATION.
+MANDATORY STATUTORY RIGHTS AND LIABILITY RULES PREVAIL.
+
+10. COMPLIANCE; CURE; SEVERABILITY; PREVIOUSLY FREE PUBLIC CODE
+
+Rights granted to a noncompliant recipient terminate for a knowing material
+breach, including hidden paid PICADS resale, suppression of required source,
+or failure to provide required commercial attribution. Rights are reinstated
+provisionally upon stopping and curing the breach, and permanently if the
+relevant holder gives no notice within 60 days after cure or if a first
+notified breach is cured within 30 days of receipt of notice. This cure
+provision does not authorize continued distribution without the required
+source. Lawfully received rights of compliant downstream recipients are not
+terminated by another person's breach.
+
+If any provision is unenforceable, the remainder applies to the extent
+permitted by law; no severability rule creates an otherwise forbidden right
+to sell PICADS. Permissions for PICADS editions that were actually made
+publicly available
+free of charge are not retroactively withdrawn by a later paid, separately
+licensed or unpublished author-controlled edition. Earlier lawfully obtained
+free copies retain the permissions under which they were received. Rights
+in contributions and external code remain with their actual owners unless
+duly transferred or licensed.

@@ -1,6 +1,52 @@
-## PICADS authoring guide — languages and design files (documentation update)
+# PICADS — Procedural Integrated Circuit Architecture and Design System
 
-New to PICADS, or deciding whether to edit `circuit.py`, `design.mcd`, `architecture.co`, or Verilog? Start with **[Programming languages and design-file contract](docs/PROGRAMMING_LANGUAGES_AND_DESIGN_FILES.md)** and the **[step-by-step authoring workflow](docs/PICADS_LANGUAGE_AUTHORING_WORKFLOW.md)**. These guides document the actual PICADS r9d behavior and explicitly distinguish restricted Python/C compilation from CO-selected independent hard-macro Verilog. They apply to PICADS projects generally, **not to any one CPU example**.
+> **WORK IN PROGRESS — experimental / pre-release EDA software.** PICADS is
+> under active development; features may be incomplete, buggy or unverified.
+> A successful synthesis, physical flow or GDS export does **not** demonstrate
+> functional equivalence, DRC/LVS closure, safe electrical operation, or
+> manufacturing qualification. **Do not treat generated masks as tapeout-ready.**
+>
+> **Read first:** [Current known problems, bugs, limitations and untested
+> functionality](docs/KNOWN_ISSUES_AND_LIMITATIONS.md). This document is the
+> maintained current-status register; older release notes are historical.
+
+**Original and principal creator:** **MotionflowOffical**  
+**Original project name:** **PICADS** (this name must be retained in distributed forks).  
+**Official source:** [github.com/MotionflowOffical/PICADS](https://github.com/MotionflowOffical/PICADS).  
+**License:** [PICADS License](LICENSE). PICADS may be used for commercial
+engineering, including designing chips and selling your own outputs.
+**Commercial use must visibly credit PICADS and original/principal creator
+MotionflowOffical and link directly to [the official PICADS source code](https://github.com/MotionflowOffical/PICADS)**
+in product documentation, relevant customer deliverables or internal project
+documentation when the work is entirely private. Privately modified PICADS
+code does **not** have to be published merely because its outputs are used
+commercially. **Standalone resale, paywalls and paid standalone access to
+PICADS itself are prohibited without rights-holder authorization.** However,
+PICADS may be embedded in a genuinely broader paid program or hosted platform
+if the distributor **publishes the exact source for its PICADS component,
+including all PICADS modifications, independently and for free**; the
+conditions of [License Section 3](LICENSE) apply. A trivial rebranding or
+paid wrapper around PICADS does not qualify. The separate, independent host
+program's code need not be opened merely because PICADS is integrated.
+Free redistribution of PICADS code still requires matching source code,
+the PICADS name, original creator credit, copyright notices and WIP warning.
+Attribution alone does not authorize commercial redistribution. See [licensing and distribution requirements](docs/LICENSING_AND_ATTRIBUTION.md)
+and [NOTICE](NOTICE). New official-project contributions require an executed
+[contributor agreement](docs/CONTRIBUTOR_AGREEMENT.md).
+
+**Free public editions remain free under their existing license permissions.**
+Separately authored PICADS editions that were not previously made publicly
+available for free may be offered by the actual rightsholder under different
+terms; this does not revoke rights in earlier free copies.
+
+PICADS supports restricted procedural hardware compilation, DLS simulation,
+RTL export, synthesis integration, and optional standard-cell physical EDA
+through external tools. Present support is limited to documented subsets and
+available environments. See [implementation status](docs/IMPLEMENTATION_STATUS.md).
+
+---
+
+## Historical release notes and earlier documentation
 
 ## r9d — CO floorplan drag-and-drop with enforced stay-outs
 

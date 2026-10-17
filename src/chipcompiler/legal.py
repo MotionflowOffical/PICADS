@@ -1,0 +1,18 @@
+"""Stable PICADS legal/attribution notices shared by CLI and GUI."""
+PROJECT_NAME = "PICADS — Procedural Integrated Circuit Architecture and Design System"
+ORIGINAL_CREATOR = "MotionflowOffical"
+OFFICIAL_SOURCE_REPOSITORY = "https://github.com/MotionflowOffical/PICADS"
+LICENSE_NAME = "PICADS License"
+LEGAL_ABOUT_TEXT = (
+    PROJECT_NAME + "\n"
+    + "Original and principal creator: " + ORIGINAL_CREATOR + "\n"
+    + "Work in progress (WIP); experimental EDA, not fabrication-qualified.\n"
+    + "Official PICADS source code: " + OFFICIAL_SOURCE_REPOSITORY + "\n"
+    + LICENSE_NAME + ".\n"
+    + "Commercial use of generated outputs is permitted with PICADS attribution.\n"
+    + "Standalone paid PICADS resale/access is restricted; genuinely broader "
+    + "paid integrations require FREE exact modified PICADS component source.\n"
+    + "Private modifications need not be disclosed solely for commercial "
+    + "internal engineering.\n"
+    + "See LICENSE, NOTICE, README.md and docs/KNOWN_ISSUES_AND_LIMITATIONS.md."
+)
